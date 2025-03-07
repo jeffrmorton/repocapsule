@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.0.8
+# Version: 1.0.9
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.0.8"
+VERSION="1.0.9"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -235,7 +235,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.0.8, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.0.9, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -370,16 +370,23 @@ find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/
 
 # File processing
 if [ "$COMPRESS" = true ]; then
+    # Generate the compressed data into a temporary file first
+    TEMP_BASE64=$(mktemp)
+    find "$(pwd)/$REPO_PATH" -type f -not -path "$(pwd)/$REPO_PATH/.git/*" -not -path "$(pwd)/$REPO_PATH/.git" -size +${COMPRESS_THRESHOLD}c -print0 | xargs -0 tar -czf - -T - | base64 -w 0 > "$TEMP_BASE64"
+    # Validate the base64 data
+    if ! base64 -d < "$TEMP_BASE64" | gzip -d >/dev/null 2>&1; then
+        log "ERROR" "Generated base64 data for compressed files is invalid"
+        echo -e "${RED}Error: Generated base64 data for compressed files is invalid${NC}" >&2
+        rm -f "$TEMP_BASE64"
+        exit 1
+    fi
     echo "if [ \"\$DUMP_MODE\" = false ] && [ \"\$VERIFY_MODE\" = false ] && [ \"\$RECALCULATE_HASH\" = false ]; then" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Ensuring directory $BASE_DIR exists before decompression...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    mkdir -p \"\$BASE_DIR\" || { echo \"Failed to create \$BASE_DIR for decompression\" >&2; exit 1; }" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decompressing large files (>1MB)...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    TEMP_FILE=\$(mktemp)" >> "$OUTPUT_SCRIPT"
-    echo "    base64 -d <<'EOF' > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
-    # Use a single command to generate and encode the tarball, avoiding line breaks
-    find "$(pwd)/$REPO_PATH" -type f -not -path "$(pwd)/$REPO_PATH/.git/*" -not -path "$(pwd)/$REPO_PATH/.git" -size +${COMPRESS_THRESHOLD}c -print0 | xargs -0 tar -czf - -T - | base64 -w 0 >> "$OUTPUT_SCRIPT"
-    echo "EOF" >> "$OUTPUT_SCRIPT"  # Ensure EOF is explicitly written
-    echo "    sync" >> "$OUTPUT_SCRIPT"  # Flush file to disk
+    echo "    printf '%s' \"$(cat "$TEMP_BASE64")\" | base64 -d > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
+    echo "    sync" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Verifying temporary file content...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    if file \$TEMP_FILE | grep -q 'gzip compressed data'; then" >> "$OUTPUT_SCRIPT"
     echo "        echo 'Temporary file is a valid gzip archive' >&2" >> "$OUTPUT_SCRIPT"
@@ -390,13 +397,14 @@ if [ "$COMPRESS" = true ]; then
     echo "        fi" >> "$OUTPUT_SCRIPT"
     echo "    else" >> "$OUTPUT_SCRIPT"
     echo "        echo 'Error: Temporary file is not a valid gzip archive' >&2" >> "$OUTPUT_SCRIPT"
-    echo "        cat \$TEMP_FILE >&2" >> "$OUTPUT_SCRIPT"  # Debug: Output the file content
+    echo "        cat \$TEMP_FILE >&2" >> "$OUTPUT_SCRIPT"
     echo "        rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     echo "        exit 1" >> "$OUTPUT_SCRIPT"
     echo "    fi" >> "$OUTPUT_SCRIPT"
     echo "    rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decompression complete.' >&2" >> "$OUTPUT_SCRIPT"
     echo "fi" >> "$OUTPUT_SCRIPT"
+    rm -f "$TEMP_BASE64"
     log "INFO" "Embedding uncompressed files..."
     # Ensure all small files are captured, including those not compressed
     find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/.git" -size -${COMPRESS_THRESHOLD}c > "$TEMP_SCRIPT.files"
