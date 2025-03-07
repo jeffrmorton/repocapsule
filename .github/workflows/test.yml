@@ -1,0 +1,73 @@
+name: Test RepoCapsule
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up test environment
+        run: |
+          # Create a test directory with various files
+          mkdir -p testrepo/.github/workflows testrepo/subdir
+          echo "name: Test Workflow" > testrepo/.github/workflows/test.yml
+          echo "Simple text file" > testrepo/simple.txt
+          echo "Hidden file" > testrepo/.hidden
+          # Create a binary file (e.g., a small image-like file)
+          head -c 1024 /dev/urandom > testrepo/binary.bin
+          # Create a large file for compression (>1MB)
+          head -c 2M /dev/urandom > testrepo/largefile.bin
+          # Add a script
+          echo "#!/bin/bash\necho Hello" > testrepo/script.sh
+          chmod +x testrepo/script.sh
+
+      - name: Run RepoCapsule - Basic Test
+        run: |
+          chmod +x ./repocapsule.sh
+          ./repocapsule.sh testrepo
+          ls -la
+          [ -f setup-testrepo.sh ] || { echo "Failed to generate setup-testrepo.sh"; exit 1; }
+          ./setup-testrepo.sh
+          ls -la testrepo
+          ./setup-testrepo.sh --verify || { echo "Verification failed"; exit 1; }
+          diff -r testrepo/ earthsync/ || { echo "Reproduced directory differs from original"; exit 1; }
+
+      - name: Run RepoCapsule - Binary Support Test
+        run: |
+          rm -rf testrepo earthsync setup-testrepo.sh
+          mkdir -p testrepo
+          cp -r testrepo.bak/* testrepo/
+          ./repocapsule.sh -b testrepo
+          [ -f setup-testrepo.sh ] || { echo "Failed to generate setup-testrepo.sh with -b"; exit 1; }
+          ./setup-testrepo.sh
+          ls -la testrepo
+          ./setup-testrepo.sh --verify || { echo "Verification failed with -b"; exit 1; }
+          diff -r testrepo/ earthsync/ || { echo "Reproduced directory differs with -b"; exit 1; }
+          [ -f earthsync/binary.bin ] || { echo "Binary file missing"; exit 1; }
+
+      - name: Run RepoCapsule - Compression Test
+        run: |
+          rm -rf testrepo earthsync setup-testrepo.sh
+          mkdir -p testrepo
+          cp -r testrepo.bak/* testrepo/
+          ./repocapsule.sh -c testrepo
+          [ -f setup-testrepo.sh ] || { echo "Failed to generate setup-testrepo.sh with -c"; exit 1; }
+          ./setup-testrepo.sh
+          ls -la testrepo
+          ./setup-testrepo.sh --verify || { echo "Verification failed with -c"; exit 1; }
+          diff -r testrepo/ earthsync/ || { echo "Reproduced directory differs with -c"; exit 1; }
+          [ -f earthsync/largefile.bin ] || { echo "Large file missing"; exit 1; }
+
+      - name: Backup testrepo for reuse
+        run: |
+          cp -r testrepo testrepo.bak
