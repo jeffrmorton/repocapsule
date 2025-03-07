@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.0.4
+# Version: 1.0.5
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.0.4"
+VERSION="1.0.5"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -235,7 +235,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.0.4, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.0.5, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -374,10 +374,17 @@ if [ "$COMPRESS" = true ]; then
     echo "    echo 'Ensuring directory $BASE_DIR exists before decompression...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    mkdir -p \"\$BASE_DIR\" || { echo \"Failed to create \$BASE_DIR for decompression\" >&2; exit 1; }" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decompressing large files (>1MB)...' >&2" >> "$OUTPUT_SCRIPT"
-    echo "    base64 -d <<'EOF' | gzip -d | tar -x -C \"\$BASE_DIR\"" >> "$OUTPUT_SCRIPT"  # Removed --strip-components=1
+    echo "    TEMP_FILE=\$(mktemp)" >> "$OUTPUT_SCRIPT"
+    echo "    base64 -d <<'EOF' > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     # Use absolute paths and filter only large files
     find "$(pwd)/$REPO_PATH" -type f -not -path "$(pwd)/$REPO_PATH/.git/*" -not -path "$(pwd)/$REPO_PATH/.git" -size +${COMPRESS_THRESHOLD}c -print0 | xargs -0 -I {} tar -czf - -C "$(dirname "{}")" "$(basename "{}")" | base64 >> "$OUTPUT_SCRIPT"
     echo "EOF" >> "$OUTPUT_SCRIPT"
+    echo "    if ! gzip -d \$TEMP_FILE | tar -x -C \"\$BASE_DIR\"; then" >> "$OUTPUT_SCRIPT"
+    echo "        echo 'Error: Failed to decompress large files' >&2" >> "$OUTPUT_SCRIPT"
+    echo "        rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
+    echo "        exit 1" >> "$OUTPUT_SCRIPT"
+    echo "    fi" >> "$OUTPUT_SCRIPT"
+    echo "    rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decompression complete.' >&2" >> "$OUTPUT_SCRIPT"
     echo "fi" >> "$OUTPUT_SCRIPT"
     log "INFO" "Embedding uncompressed files..."
