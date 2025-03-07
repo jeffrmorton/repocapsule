@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.1.1
+# Version: 1.1.2
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.1.1"
+VERSION="1.1.2"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -235,7 +235,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.1.1, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.1.2, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -397,9 +397,11 @@ if [ "$COMPRESS" = true ]; then
     echo "    sync" >> "$OUTPUT_SCRIPT"
     echo "    # Validate the decoded data" >> "$OUTPUT_SCRIPT"
     echo "    DECODED_HASH=\$(md5sum \$TEMP_FILE | cut -d' ' -f1 || md5 -r \$TEMP_FILE | cut -d' ' -f1)" >> "$OUTPUT_SCRIPT"
+    echo "    echo 'Decoded data hash: \$DECODED_HASH' >&2" >> "$OUTPUT_SCRIPT"  # Add logging
     echo "    EXPECTED_HASH='$BASE64_HASH'" >> "$OUTPUT_SCRIPT"
     echo "    if [ \"\$DECODED_HASH\" != \"\$EXPECTED_HASH\" ]; then" >> "$OUTPUT_SCRIPT"
     echo "        echo 'Error: Decoded base64 data hash mismatch (expected: \$EXPECTED_HASH, got: \$DECODED_HASH)' >&2" >> "$OUTPUT_SCRIPT"
+    echo "        head -c 100 \$TEMP_FILE | xxd >&2" >> "$OUTPUT_SCRIPT"  # Debug: Show first 100 bytes
     echo "        rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     echo "        exit 1" >> "$OUTPUT_SCRIPT"
     echo "    fi" >> "$OUTPUT_SCRIPT"
