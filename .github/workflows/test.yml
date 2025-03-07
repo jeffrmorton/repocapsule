@@ -40,6 +40,9 @@ jobs:
           cd ..
           # Verify test environment
           ls -la testrepo/ || { echo "Test environment setup failed"; exit 1; }
+          # Save original files for comparison
+          cp testrepo/largefile.bin testrepo_largefile.bin.original
+          cp testrepo/binary.bin testrepo_binary.bin.original
 
       - name: Debug test environment
         run: |
@@ -52,18 +55,25 @@ jobs:
           ./repocapsule.sh -b -c -v testrepo  # Added -v for verbose logging
           ls -la
           [ -f setup-testrepo.sh ] || { echo "Failed to generate setup-testrepo.sh"; exit 1; }
+          # Save original testrepo for comparison
+          cp -r testrepo testrepo.original
+          rm -rf testrepo
           ./setup-testrepo.sh
           ls -la
-          # Debug: List reproduced files (should be testrepo, not earthsync)
+          # Debug: List reproduced files
           echo "Contents of testrepo (reproduced):"
           find testrepo -type f
+          # Debug: Compare largefile.bin and binary.bin
+          echo "Comparing largefile.bin:"
+          diff -q testrepo_largefile.bin.original testrepo/largefile.bin || echo "largefile.bin differs"
+          echo "Comparing binary.bin:"
+          diff -q testrepo_binary.bin.original testrepo/binary.bin || echo "binary.bin differs"
           # Debug: Compare hashes manually
-          ORIGINAL_HASH=$(find testrepo -type f -not -path "testrepo/.git/*" -not -path "testrepo/.git" -exec cat {} + 2>/dev/null | tr -d '\r' | md5sum | cut -d' ' -f1)
-          REPRODUCED_HASH=$(find testrepo -type f -not -path "testrepo/.git/*" -not -path "testrepo/.git" -exec cat {} + 2>/dev/null | tr -d '\r' | md5sum | cut -d' ' -f1)
+          ORIGINAL_HASH=$(find testrepo.original -type f -not -path "testrepo.original/.git/*" -not -path "testrepo.original/.git" -exec cat {} + 2>/dev/null | md5sum | cut -d' ' -f1)
+          REPRODUCED_HASH=$(find testrepo -type f -not -path "testrepo/.git/*" -not -path "testrepo/.git" -exec cat {} + 2>/dev/null | md5sum | cut -d' ' -f1)
           echo "Original Hash: $ORIGINAL_HASH"
           echo "Reproduced Hash: $REPRODUCED_HASH"
           ./setup-testrepo.sh --verify || { echo "Verification failed"; exit 1; }
-          diff -r --no-dereference testrepo/ testrepo/ || { echo "Reproduced directory differs from original"; exit 1; }
 
       - name: Run RepoCapsule - Binary Support Test
         run: |
@@ -72,10 +82,10 @@ jobs:
           cp -r testrepo.bak/* testrepo/
           ./repocapsule.sh -b testrepo
           [ -f setup-testrepo.sh ] || { echo "Failed to generate setup-testrepo.sh with -b"; exit 1; }
+          rm -rf testrepo
           ./setup-testrepo.sh
           ls -la testrepo
           ./setup-testrepo.sh --verify || { echo "Verification failed with -b"; exit 1; }
-          diff -r --no-dereference testrepo/ testrepo/ || { echo "Reproduced directory differs with -b"; exit 1; }
           [ -f testrepo/binary.bin ] || { echo "Binary file missing"; exit 1; }
 
       - name: Run RepoCapsule - Compression Test
@@ -85,10 +95,10 @@ jobs:
           cp -r testrepo.bak/* testrepo/
           ./repocapsule.sh -c testrepo
           [ -f setup-testrepo.sh ] || { echo "Failed to generate setup-testrepo.sh with -c"; exit 1; }
+          rm -rf testrepo
           ./setup-testrepo.sh
           ls -la testrepo
           ./setup-testrepo.sh --verify || { echo "Verification failed with -c"; exit 1; }
-          diff -r --no-dereference testrepo/ testrepo/ || { echo "Reproduced directory differs with -c"; exit 1; }
           [ -f testrepo/largefile.bin ] || { echo "Large file missing"; exit 1; }
 
       - name: Backup testrepo for reuse
