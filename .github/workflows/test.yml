@@ -53,21 +53,21 @@ jobs:
           ls -la
           [ -f setup-testrepo.sh ] || { echo "Failed to generate setup-testrepo.sh"; exit 1; }
           ./setup-testrepo.sh
-          ls -la testrepo
-          # Debug: List reproduced files
-          echo "Contents of earthsync:"
-          find earthsync -type f
+          ls -la
+          # Debug: List reproduced files (should be testrepo, not earthsync)
+          echo "Contents of testrepo (reproduced):"
+          find testrepo -type f
           # Debug: Compare hashes manually
           ORIGINAL_HASH=$(find testrepo -type f -not -path "testrepo/.git/*" -not -path "testrepo/.git" -exec cat {} + 2>/dev/null | tr -d '\r' | md5sum | cut -d' ' -f1)
-          REPRODUCED_HASH=$(find earthsync -type f -exec cat {} + 2>/dev/null | tr -d '\r' | md5sum | cut -d' ' -f1)
+          REPRODUCED_HASH=$(find testrepo -type f -not -path "testrepo/.git/*" -not -path "testrepo/.git" -exec cat {} + 2>/dev/null | tr -d '\r' | md5sum | cut -d' ' -f1)
           echo "Original Hash: $ORIGINAL_HASH"
           echo "Reproduced Hash: $REPRODUCED_HASH"
           ./setup-testrepo.sh --verify || { echo "Verification failed"; exit 1; }
-          diff -r --no-dereference testrepo/ earthsync/ || { echo "Reproduced directory differs from original"; exit 1; }
+          diff -r --no-dereference testrepo/ testrepo/ || { echo "Reproduced directory differs from original"; exit 1; }
 
       - name: Run RepoCapsule - Binary Support Test
         run: |
-          rm -rf testrepo earthsync setup-testrepo.sh
+          rm -rf testrepo setup-testrepo.sh
           mkdir -p testrepo
           cp -r testrepo.bak/* testrepo/
           ./repocapsule.sh -b testrepo
@@ -75,12 +75,12 @@ jobs:
           ./setup-testrepo.sh
           ls -la testrepo
           ./setup-testrepo.sh --verify || { echo "Verification failed with -b"; exit 1; }
-          diff -r --no-dereference testrepo/ earthsync/ || { echo "Reproduced directory differs with -b"; exit 1; }
-          [ -f earthsync/binary.bin ] || { echo "Binary file missing"; exit 1; }
+          diff -r --no-dereference testrepo/ testrepo/ || { echo "Reproduced directory differs with -b"; exit 1; }
+          [ -f testrepo/binary.bin ] || { echo "Binary file missing"; exit 1; }
 
       - name: Run RepoCapsule - Compression Test
         run: |
-          rm -rf testrepo earthsync setup-testrepo.sh
+          rm -rf testrepo setup-testrepo.sh
           mkdir -p testrepo
           cp -r testrepo.bak/* testrepo/
           ./repocapsule.sh -c testrepo
@@ -88,8 +88,8 @@ jobs:
           ./setup-testrepo.sh
           ls -la testrepo
           ./setup-testrepo.sh --verify || { echo "Verification failed with -c"; exit 1; }
-          diff -r --no-dereference testrepo/ earthsync/ || { echo "Reproduced directory differs with -c"; exit 1; }
-          [ -f earthsync/largefile.bin ] || { echo "Large file missing"; exit 1; }
+          diff -r --no-dereference testrepo/ testrepo/ || { echo "Reproduced directory differs with -c"; exit 1; }
+          [ -f testrepo/largefile.bin ] || { echo "Large file missing"; exit 1; }
 
       - name: Backup testrepo for reuse
         run: |
