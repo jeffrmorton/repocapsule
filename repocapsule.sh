@@ -3,7 +3,7 @@
 # RepoCapsule: Package a directory/repository into a single, portable Bash script for reproduction, LLM editing, and sharing
 # Intent: This script transforms a directory (e.g., a code repository) into a self-contained Bash script (setup-<repo>.sh) that:
 #   - Embeds all files in dual format: plain text for LLM readability and base64 for execution.
-#   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory named after the repo (e.g., earthsync/client, not earthsync/earthsync/client).
+#   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
 # Version: 1.0.0
@@ -235,7 +235,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.3.13, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.0.0, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -363,7 +363,8 @@ if [ "$COMPRESS" = true ]; then
     echo "if [ \"\$DUMP_MODE\" = false ] && [ \"\$VERIFY_MODE\" = false ] && [ \"\$RECALCULATE_HASH\" = false ]; then" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decompressing large files (>1MB)...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    base64 -d <<'EOF' | gzip -d | tar -x -C \"\$BASE_DIR\" --strip-components=1" >> "$OUTPUT_SCRIPT"
-    find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/.git" -exec tar -czf - -C "$REPO_PATH" {} + | base64 >> "$OUTPUT_SCRIPT"
+    # Use absolute paths and filter only large files
+    find "$(pwd)/$REPO_PATH" -type f -not -path "$(pwd)/$REPO_PATH/.git/*" -not -path "$(pwd)/$REPO_PATH/.git" -size +${COMPRESS_THRESHOLD}c -print0 | xargs -0 -I {} tar -czf - -C "$(dirname "{}")" "$(basename "{}")" | base64 >> "$OUTPUT_SCRIPT"
     echo "EOF" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decompression complete.' >&2" >> "$OUTPUT_SCRIPT"
     echo "fi" >> "$OUTPUT_SCRIPT"

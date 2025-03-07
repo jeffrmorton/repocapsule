@@ -33,6 +33,11 @@ jobs:
           # Verify test environment
           ls -la testrepo/ || { echo "Test environment setup failed"; exit 1; }
 
+      - name: Debug test environment
+        run: |
+          echo "Contents of testrepo:"
+          find testrepo -type f
+
       - name: Run RepoCapsule - Basic Test
         run: |
           chmod +x ./repocapsule.sh
