@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.0.6
+# Version: 1.0.7
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.0.6"
+VERSION="1.0.7"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -235,7 +235,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.0.6, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.0.7, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -376,11 +376,12 @@ if [ "$COMPRESS" = true ]; then
     echo "    echo 'Decompressing large files (>1MB)...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    TEMP_FILE=\$(mktemp)" >> "$OUTPUT_SCRIPT"
     echo "    base64 -d <<'EOF' > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
-    # Use absolute paths and filter only large files
-    find "$(pwd)/$REPO_PATH" -type f -not -path "$(pwd)/$REPO_PATH/.git/*" -not -path "$(pwd)/$REPO_PATH/.git" -size +${COMPRESS_THRESHOLD}c -print0 | xargs -0 -I {} sh -c 'tar -czf - -C "$(dirname "{}")" "$(basename "{}")" | base64' >> "$OUTPUT_SCRIPT"
+    # Use a single command to generate and encode the tarball, avoiding line breaks
+    find "$(pwd)/$REPO_PATH" -type f -not -path "$(pwd)/$REPO_PATH/.git/*" -not -path "$(pwd)/$REPO_PATH/.git" -size +${COMPRESS_THRESHOLD}c -print0 | xargs -0 tar -czf - -T - | base64 -w 0 >> "$OUTPUT_SCRIPT"
     echo "EOF" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Verifying temporary file content...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    if file \$TEMP_FILE | grep -q 'gzip compressed data'; then" >> "$OUTPUT_SCRIPT"
+    echo "        echo 'Temporary file is a valid gzip archive' >&2" >> "$OUTPUT_SCRIPT"
     echo "        if ! gzip -d \$TEMP_FILE | tar -x -C \"\$BASE_DIR\"; then" >> "$OUTPUT_SCRIPT"
     echo "            echo 'Error: Failed to decompress large files' >&2" >> "$OUTPUT_SCRIPT"
     echo "            rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
@@ -388,6 +389,7 @@ if [ "$COMPRESS" = true ]; then
     echo "        fi" >> "$OUTPUT_SCRIPT"
     echo "    else" >> "$OUTPUT_SCRIPT"
     echo "        echo 'Error: Temporary file is not a valid gzip archive' >&2" >> "$OUTPUT_SCRIPT"
+    echo "        cat \$TEMP_FILE >&2" >> "$OUTPUT_SCRIPT"  # Debug: Output the file content
     echo "        rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     echo "        exit 1" >> "$OUTPUT_SCRIPT"
     echo "    fi" >> "$OUTPUT_SCRIPT"
