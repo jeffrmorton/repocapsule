@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.2.1
+# Version: 1.2.2
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.2.1"
+VERSION="1.2.2"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -100,7 +100,7 @@ create_file() {
     else
         echo "        if tr -d '\r' <<'BASE64_${rel_file//\//_}' | base64 -d > \"\$BASE_DIR/$rel_file\"; then" >> "$output"
         base64 "$file" | tr -d '\r' >> "$output"
-        echo "BASE64_${rel_file//\//_}" >> "$output"
+        echo "BASE64_${rel_file//\//_}" >> "$OUTPUT_SCRIPT"
     fi
     echo "            chmod $perms \"\$BASE_DIR/$rel_file\" 2>/dev/null || echo \"Warning: Failed to set permissions on \$BASE_DIR/$rel_file\" >&2" >> "$output"
     echo "            break" >> "$output"
@@ -236,7 +236,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.2.1, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.2.2, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -406,7 +406,7 @@ if [ "$COMPRESS" = true ]; then
     echo "    # Reassemble base64 data from chunks" >> "$OUTPUT_SCRIPT"
     echo "    > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     for ((i=0; i<CHUNK_COUNT; i++)); do
-        echo "    printf '%s' \"\$BASE64_CHUNK_$i\" >> \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
+        echo "    echo -n \"\$BASE64_CHUNK_$i\" >> \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     done
     echo "    # Validate the reassembled base64 data" >> "$OUTPUT_SCRIPT"
     echo "    EMBEDDED_HASH=\$(md5sum \$TEMP_FILE | cut -d' ' -f1 || md5 -r \$TEMP_FILE | cut -d' ' -f1)" >> "$OUTPUT_SCRIPT"
@@ -421,23 +421,26 @@ if [ "$COMPRESS" = true ]; then
     echo "    base64 -d \$TEMP_FILE > \$TEMP_FILE.decoded" >> "$OUTPUT_SCRIPT"
     echo "    mv \$TEMP_FILE.decoded \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     echo "    sync" >> "$OUTPUT_SCRIPT"
-    echo "    # Validate the decoded data size and hash" >> "$OUTPUT_SCRIPT"
+    # Enhanced debugging
+    echo "    echo \"Decoded data first 16 bytes (hex):\" >&2" >> "$OUTPUT_SCRIPT"
+    echo "    hexdump -C \$TEMP_FILE -n 16 >&2" >> "$OUTPUT_SCRIPT"
+    echo "    # Validate the decoded data" >> "$OUTPUT_SCRIPT"
     echo "    DECODED_SIZE=\$(wc -c < \$TEMP_FILE | cut -d' ' -f1)" >> "$OUTPUT_SCRIPT"
     echo "    echo \"Decoded data size: \$DECODED_SIZE bytes\" >&2" >> "$OUTPUT_SCRIPT"
-    echo "    DECODED_HASH=\$(md5sum \$TEMP_FILE | cut -d' ' -f1 || md5 -r \$TEMP_FILE | cut -d' ' -f1)" >> "$OUTPUT_SCRIPT"
-    echo "    echo \"Decoded data hash: \$DECODED_HASH\" >&2" >> "$OUTPUT_SCRIPT"
-    echo "    head -c 16 \$TEMP_FILE | xxd >&2" >> "$OUTPUT_SCRIPT"
-    echo "    echo \"Verifying temporary file content...\" >&2" >> "$OUTPUT_SCRIPT"
-    echo "    if file \$TEMP_FILE | grep -q 'gzip compressed data'; then" >> "$OUTPUT_SCRIPT"
-    echo "        echo \"Temporary file is a valid gzip archive\" >&2" >> "$OUTPUT_SCRIPT"
-    echo "        if ! gzip -d \$TEMP_FILE | tar -x -C \"\$BASE_DIR\"; then" >> "$OUTPUT_SCRIPT"
-    echo "            echo \"Error: Failed to decompress large files\" >&2" >> "$OUTPUT_SCRIPT"
-    echo "            rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
-    echo "            exit 1" >> "$OUTPUT_SCRIPT"
-    echo "        fi" >> "$OUTPUT_SCRIPT"
-    echo "    else" >> "$OUTPUT_SCRIPT"
-    echo "        echo \"Error: Temporary file is not a valid gzip archive\" >&2" >> "$OUTPUT_SCRIPT"
+    echo "    if [ \$DECODED_SIZE -eq 0 ]; then" >> "$OUTPUT_SCRIPT"
+    echo "        echo \"Error: Decoded data is empty\" >&2" >> "$OUTPUT_SCRIPT"
+    echo "        rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
+    echo "        exit 1" >> "$OUTPUT_SCRIPT"
+    echo "    fi" >> "$OUTPUT_SCRIPT"
+    echo "    if ! file \$TEMP_FILE | grep -q 'gzip compressed data'; then" >> "$OUTPUT_SCRIPT"
+    echo "        echo \"Error: Decoded data is not a valid gzip archive\" >&2" >> "$OUTPUT_SCRIPT"
     echo "        cat \$TEMP_FILE >&2" >> "$OUTPUT_SCRIPT"
+    echo "        rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
+    echo "        exit 1" >> "$OUTPUT_SCRIPT"
+    echo "    fi" >> "$OUTPUT_SCRIPT"
+    echo "    # Decompress the tar archive" >> "$OUTPUT_SCRIPT"
+    echo "    if ! gzip -d \$TEMP_FILE | tar -x -C \"\$BASE_DIR\"; then" >> "$OUTPUT_SCRIPT"
+    echo "        echo \"Error: Failed to decompress large files\" >&2" >> "$OUTPUT_SCRIPT"
     echo "        rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     echo "        exit 1" >> "$OUTPUT_SCRIPT"
     echo "    fi" >> "$OUTPUT_SCRIPT"
