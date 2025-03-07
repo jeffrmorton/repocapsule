@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.2.3
+# Version: 1.2.4
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.2.3"
+VERSION="1.2.4"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -236,7 +236,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.2.3, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.2.4, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -265,16 +265,29 @@ verify_hash() {
         exit 1
     fi
     if command -v md5sum >/dev/null 2>&1; then
-        computed_hash=$(find "$REPO_NAME" -type f -exec cat {} + 2>/dev/null | md5sum | cut -d' ' -f1)
+        computed_hash=$(find "$REPO_NAME" -type f -not -path "$REPO_NAME/.git/*" -not -path "$REPO_NAME/.git" -exec cat {} + 2>/dev/null | md5sum | cut -d' ' -f1)
     elif command -v md5 >/dev/null 2>&1; then
-        computed_hash=$(find "$REPO_NAME" -type f -exec cat {} + 2>/dev/null | md5 -r | cut -d' ' -f1)
+        computed_hash=$(find "$REPO_NAME" -type f -not -path "$REPO_NAME/.git/*" -not -path "$REPO_NAME/.git" -exec cat {} + 2>/dev/null | md5 -r | cut -d' ' -f1)
     else
         echo "Error: md5sum or md5 required for verification" >&2
         exit 1
     fi
+    echo "Verification: Original Hash: $SOURCE_HASH" >&2
+    echo "Verification: Reproduced Hash: $computed_hash" >&2
     if [ "$computed_hash" = "$SOURCE_HASH" ]; then
         echo "Verification successful: Hash matches ($SOURCE_HASH)" >&2
     else
+        # Debug individual file hashes
+        echo "Debug: Individual file hash comparison:" >&2
+        for file in $(find "$REPO_NAME" -type f -not -path "$REPO_NAME/.git/*" -not -path "$REPO_NAME/.git"); do
+            rel_file=${file#"$REPO_NAME/"}
+            orig_file="$REPO_PATH/$rel_file"
+            if [ -f "$orig_file" ]; then
+                orig_hash=$(md5sum "$orig_file" | cut -d' ' -f1 || md5 -r "$orig_file" | cut -d' ' -f1)
+                repro_hash=$(md5sum "$file" | cut -d' ' -f1 || md5 -r "$file" | cut -d' ' -f1)
+                echo "  $rel_file: Original Hash: $orig_hash, Reproduced Hash: $repro_hash" >&2
+            fi
+        done
         echo "Verification failed: Reproduced hash ($computed_hash) != original ($SOURCE_HASH)" >&2
         exit 1
     fi
@@ -283,9 +296,9 @@ verify_hash() {
 recalculate_hash() {
     local new_hash
     if command -v md5sum >/dev/null 2>&1; then
-        new_hash=$(find "$REPO_NAME" -type f -exec cat {} + 2>/dev/null | md5sum | cut -d' ' -f1)
+        new_hash=$(find "$REPO_NAME" -type f -not -path "$REPO_NAME/.git/*" -not -path "$REPO_NAME/.git" -exec cat {} + 2>/dev/null | md5sum | cut -d' ' -f1)
     elif command -v md5 >/dev/null 2>&1; then
-        new_hash=$(find "$REPO_NAME" -type f -exec cat {} + 2>/dev/null | md5 -r | cut -d' ' -f1)
+        new_hash=$(find "$REPO_NAME" -type f -not -path "$REPO_NAME/.git/*" -not -path "$REPO_NAME/.git" -exec cat {} + 2>/dev/null | md5 -r | cut -d' ' -f1)
     else
         echo "Error: md5sum or md5 required for hash recalculation" >&2
         exit 1
