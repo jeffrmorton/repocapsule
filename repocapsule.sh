@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.0.3
+# Version: 1.0.4
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.0.3"
+VERSION="1.0.4"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -98,7 +98,7 @@ create_file() {
         echo "BASE64_${rel_file//\//_}" >> "$output"
     else
         echo "        if tr -d '\r' <<'BASE64_${rel_file//\//_}' | base64 -d > \"\$BASE_DIR/$rel_file\"; then" >> "$output"
-        base64 "$file" | tr -d '\r' >> "$output"  # Apply tr during encoding for text files
+        base64 "$file" | tr -d '\r' >> "$output"
         echo "BASE64_${rel_file//\//_}" >> "$output"
     fi
     echo "            chmod $perms \"\$BASE_DIR/$rel_file\" 2>/dev/null || echo \"Warning: Failed to set permissions on \$BASE_DIR/$rel_file\" >&2" >> "$output"
@@ -194,7 +194,7 @@ if [ "$FILE_COUNT" -eq 0 ]; then
     echo -e "${RED}Error: No files found in '$REPO_PATH' to process${NC}" >&2
     exit 1
 fi
-SOURCE_HASH=$(find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/.git" -exec cat {} + 2>/dev/null | tr -d '\r' | md5sum | cut -d' ' -f1 || find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/.git" -exec cat {} + | tr -d '\r' | md5 -r | cut -d' ' -f1)
+SOURCE_HASH=$(find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/.git" -exec cat {} + 2>/dev/null | md5sum | cut -d' ' -f1 || find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/.git" -exec cat {} + | md5 -r | cut -d' ' -f1)
 TOTAL_SIZE=$(du -sb "$REPO_PATH" | cut -f1 2>/dev/null || du -sk "$REPO_PATH" | cut -f1)
 GIT_COMMIT=$(cd "$REPO_PATH" && git rev-parse HEAD 2>/dev/null || echo "N/A")
 
@@ -235,7 +235,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.0.3, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.0.4, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -374,7 +374,7 @@ if [ "$COMPRESS" = true ]; then
     echo "    echo 'Ensuring directory $BASE_DIR exists before decompression...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    mkdir -p \"\$BASE_DIR\" || { echo \"Failed to create \$BASE_DIR for decompression\" >&2; exit 1; }" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decompressing large files (>1MB)...' >&2" >> "$OUTPUT_SCRIPT"
-    echo "    base64 -d <<'EOF' | gzip -d | tar -x -C \"\$BASE_DIR\" --strip-components=1" >> "$OUTPUT_SCRIPT"
+    echo "    base64 -d <<'EOF' | gzip -d | tar -x -C \"\$BASE_DIR\"" >> "$OUTPUT_SCRIPT"  # Removed --strip-components=1
     # Use absolute paths and filter only large files
     find "$(pwd)/$REPO_PATH" -type f -not -path "$(pwd)/$REPO_PATH/.git/*" -not -path "$(pwd)/$REPO_PATH/.git" -size +${COMPRESS_THRESHOLD}c -print0 | xargs -0 -I {} tar -czf - -C "$(dirname "{}")" "$(basename "{}")" | base64 >> "$OUTPUT_SCRIPT"
     echo "EOF" >> "$OUTPUT_SCRIPT"

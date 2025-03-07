@@ -41,8 +41,8 @@ jobs:
           # Verify test environment
           ls -la testrepo/ || { echo "Test environment setup failed"; exit 1; }
           # Save original files for comparison
-          cp testrepo/largefile.bin testrepo_largefile.bin.original
-          cp testrepo/binary.bin testrepo_binary.bin.original
+          cp testrepo/largefile.bin testrepo/largefile.bin.original
+          cp testrepo/binary.bin testrepo/binary.bin.original
 
       - name: Debug test environment
         run: |
@@ -65,9 +65,17 @@ jobs:
           find testrepo -type f
           # Debug: Compare largefile.bin and binary.bin
           echo "Comparing largefile.bin:"
-          diff -q testrepo_largefile.bin.original testrepo/largefile.bin || echo "largefile.bin differs"
+          if [ -f testrepo/largefile.bin.original ] && [ -f testrepo/largefile.bin ]; then
+              diff -q testrepo/largefile.bin.original testrepo/largefile.bin || echo "largefile.bin differs"
+          else
+              echo "largefile.bin comparison failed: file(s) missing"
+          fi
           echo "Comparing binary.bin:"
-          diff -q testrepo_binary.bin.original testrepo/binary.bin || echo "binary.bin differs"
+          if [ -f testrepo/binary.bin.original ] && [ -f testrepo/binary.bin ]; then
+              diff -q testrepo/binary.bin.original testrepo/binary.bin || echo "binary.bin differs"
+          else
+              echo "binary.bin comparison failed: file(s) missing"
+          fi
           # Debug: Compare hashes manually
           ORIGINAL_HASH=$(find testrepo.original -type f -not -path "testrepo.original/.git/*" -not -path "testrepo.original/.git" -exec cat {} + 2>/dev/null | md5sum | cut -d' ' -f1)
           REPRODUCED_HASH=$(find testrepo -type f -not -path "testrepo/.git/*" -not -path "testrepo/.git" -exec cat {} + 2>/dev/null | md5sum | cut -d' ' -f1)
