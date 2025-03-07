@@ -6,18 +6,19 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.2.0
+# Version: 1.2.1
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.2.0"
+VERSION="1.2.1"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
 COMPRESS_THRESHOLD=1048576 # 1MB in bytes
+BASE64_CHUNK_SIZE=524288   # 512KB in bytes for base64 chunks
 BANNER="RepoCapsule v$VERSION - Pack it, script it, ship it!"
 
 RED='\033[0;31m'
@@ -235,7 +236,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.2.0, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.2.1, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -385,56 +386,63 @@ if [ "$COMPRESS" = true ]; then
     log "INFO" "Base64 data hash: $BASE64_HASH"
     BASE64_LENGTH=$(wc -c < "$TEMP_BASE64")
     log "INFO" "Embedding base64 data (length: $BASE64_LENGTH bytes)"
-    # Embed base64 data as a variable with escaping
+    # Split base64 data into chunks and embed as separate variables
     echo "if [ \"\$DUMP_MODE\" = false ] && [ \"\$VERIFY_MODE\" = false ] && [ \"\$RECALCULATE_HASH\" = false ]; then" >> "$OUTPUT_SCRIPT"
-    echo "    echo 'Ensuring directory $BASE_DIR exists before decompression...' >&2" >> "$OUTPUT_SCRIPT"
+    echo "    echo \"Ensuring directory \$BASE_DIR exists before decompression...\" >&2" >> "$OUTPUT_SCRIPT"
     echo "    mkdir -p \"\$BASE_DIR\" || { echo \"Failed to create \$BASE_DIR for decompression\" >&2; exit 1; }" >> "$OUTPUT_SCRIPT"
-    echo "    echo 'Decompressing large files (>1MB)...' >&2" >> "$OUTPUT_SCRIPT"
+    echo "    echo \"Decompressing large files (>1MB)...\" >&2" >> "$OUTPUT_SCRIPT"
     echo "    TEMP_FILE=\$(mktemp)" >> "$OUTPUT_SCRIPT"
-    echo "    # Define the base64 data as a variable" >> "$OUTPUT_SCRIPT"
-    echo "    BASE64_DATA=\"\"" >> "$OUTPUT_SCRIPT"
-    # Read the base64 data and split into chunks, escaping special characters
-    while IFS= read -r chunk; do
-        # Escape quotes and backslashes
-        chunk=$(echo "$chunk" | sed 's/"/\\"/g; s/\\/\\\\/g')
-        echo "    BASE64_DATA=\"\$BASE64_DATA$chunk\"" >> "$OUTPUT_SCRIPT"
-    done < <(cat "$TEMP_BASE64" | fold -w 1000000)
-    echo "    # Validate the embedded base64 data" >> "$OUTPUT_SCRIPT"
-    echo "    echo -n \"\$BASE64_DATA\" > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
+    echo "    # Define base64 data chunks" >> "$OUTPUT_SCRIPT"
+    CHUNK_COUNT=0
+    split -b "$BASE64_CHUNK_SIZE" "$TEMP_BASE64" chunk_
+    for chunk in chunk_*; do
+        if [ -f "$chunk" ]; then
+            CHUNK_DATA=$(cat "$chunk" | sed 's/"/\\"/g; s/\\/\\\\/g')
+            echo "    BASE64_CHUNK_$CHUNK_COUNT=\"$CHUNK_DATA\"" >> "$OUTPUT_SCRIPT"
+            CHUNK_COUNT=$((CHUNK_COUNT + 1))
+            rm "$chunk"
+        fi
+    done
+    echo "    # Reassemble base64 data from chunks" >> "$OUTPUT_SCRIPT"
+    echo "    > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
+    for ((i=0; i<CHUNK_COUNT; i++)); do
+        echo "    printf '%s' \"\$BASE64_CHUNK_$i\" >> \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
+    done
+    echo "    # Validate the reassembled base64 data" >> "$OUTPUT_SCRIPT"
     echo "    EMBEDDED_HASH=\$(md5sum \$TEMP_FILE | cut -d' ' -f1 || md5 -r \$TEMP_FILE | cut -d' ' -f1)" >> "$OUTPUT_SCRIPT"
-    echo "    echo 'Embedded base64 data hash: \$EMBEDDED_HASH' >&2" >> "$OUTPUT_SCRIPT"
+    echo "    echo \"Embedded base64 data hash: \$EMBEDDED_HASH\" >&2" >> "$OUTPUT_SCRIPT"
     echo "    EXPECTED_HASH='$BASE64_HASH'" >> "$OUTPUT_SCRIPT"
     echo "    if [ \"\$EMBEDDED_HASH\" != \"\$EXPECTED_HASH\" ]; then" >> "$OUTPUT_SCRIPT"
-    echo "        echo 'Error: Embedded base64 data hash mismatch (expected: \$EXPECTED_HASH, got: \$EMBEDDED_HASH)' >&2" >> "$OUTPUT_SCRIPT"
+    echo "        echo \"Error: Embedded base64 data hash mismatch (expected: \$EXPECTED_HASH, got: \$EMBEDDED_HASH)\" >&2" >> "$OUTPUT_SCRIPT"
     echo "        rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     echo "        exit 1" >> "$OUTPUT_SCRIPT"
     echo "    fi" >> "$OUTPUT_SCRIPT"
     echo "    # Decode the base64 data" >> "$OUTPUT_SCRIPT"
-    echo "    echo -n \"\$BASE64_DATA\" | base64 -d > \$TEMP_FILE.decoded" >> "$OUTPUT_SCRIPT"
+    echo "    base64 -d \$TEMP_FILE > \$TEMP_FILE.decoded" >> "$OUTPUT_SCRIPT"
     echo "    mv \$TEMP_FILE.decoded \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     echo "    sync" >> "$OUTPUT_SCRIPT"
     echo "    # Validate the decoded data size and hash" >> "$OUTPUT_SCRIPT"
     echo "    DECODED_SIZE=\$(wc -c < \$TEMP_FILE | cut -d' ' -f1)" >> "$OUTPUT_SCRIPT"
-    echo "    echo 'Decoded data size: \$DECODED_SIZE bytes' >&2" >> "$OUTPUT_SCRIPT"
+    echo "    echo \"Decoded data size: \$DECODED_SIZE bytes\" >&2" >> "$OUTPUT_SCRIPT"
     echo "    DECODED_HASH=\$(md5sum \$TEMP_FILE | cut -d' ' -f1 || md5 -r \$TEMP_FILE | cut -d' ' -f1)" >> "$OUTPUT_SCRIPT"
-    echo "    echo 'Decoded data hash: \$DECODED_HASH' >&2" >> "$OUTPUT_SCRIPT"
+    echo "    echo \"Decoded data hash: \$DECODED_HASH\" >&2" >> "$OUTPUT_SCRIPT"
     echo "    head -c 16 \$TEMP_FILE | xxd >&2" >> "$OUTPUT_SCRIPT"
-    echo "    echo 'Verifying temporary file content...' >&2" >> "$OUTPUT_SCRIPT"
+    echo "    echo \"Verifying temporary file content...\" >&2" >> "$OUTPUT_SCRIPT"
     echo "    if file \$TEMP_FILE | grep -q 'gzip compressed data'; then" >> "$OUTPUT_SCRIPT"
-    echo "        echo 'Temporary file is a valid gzip archive' >&2" >> "$OUTPUT_SCRIPT"
+    echo "        echo \"Temporary file is a valid gzip archive\" >&2" >> "$OUTPUT_SCRIPT"
     echo "        if ! gzip -d \$TEMP_FILE | tar -x -C \"\$BASE_DIR\"; then" >> "$OUTPUT_SCRIPT"
-    echo "            echo 'Error: Failed to decompress large files' >&2" >> "$OUTPUT_SCRIPT"
+    echo "            echo \"Error: Failed to decompress large files\" >&2" >> "$OUTPUT_SCRIPT"
     echo "            rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     echo "            exit 1" >> "$OUTPUT_SCRIPT"
     echo "        fi" >> "$OUTPUT_SCRIPT"
     echo "    else" >> "$OUTPUT_SCRIPT"
-    echo "        echo 'Error: Temporary file is not a valid gzip archive' >&2" >> "$OUTPUT_SCRIPT"
+    echo "        echo \"Error: Temporary file is not a valid gzip archive\" >&2" >> "$OUTPUT_SCRIPT"
     echo "        cat \$TEMP_FILE >&2" >> "$OUTPUT_SCRIPT"
     echo "        rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     echo "        exit 1" >> "$OUTPUT_SCRIPT"
     echo "    fi" >> "$OUTPUT_SCRIPT"
     echo "    rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
-    echo "    echo 'Decompression complete.' >&2" >> "$OUTPUT_SCRIPT"
+    echo "    echo \"Decompression complete.\" >&2" >> "$OUTPUT_SCRIPT"
     echo "fi" >> "$OUTPUT_SCRIPT"
     rm -f "$TEMP_BASE64"
     log "INFO" "Embedding uncompressed files..."
