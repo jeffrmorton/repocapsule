@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.0.1
+# Version: 1.0.2
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.0.1"
+VERSION="1.0.2"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -235,7 +235,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.0.1, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.0.2, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -322,6 +322,10 @@ else
 fi
 
 BASE_DIR="$REPO_NAME"
+if [ "$COMPRESS" = true ] && [ "$DUMP_MODE" = false ] && [ "$VERIFY_MODE" = false ] && [ "$RECALCULATE_HASH" = false ]; then
+    mkdir -p "$BASE_DIR" || { echo "Failed to create $BASE_DIR" >&2; exit 1; }
+    echo "echo 'Ensuring directory $BASE_DIR exists before decompression...' >&2" >> "$OUTPUT_SCRIPT"
+fi
 if [ "$DUMP_MODE" = false ] && [ "$VERIFY_MODE" = false ] && [ "$RECALCULATE_HASH" = false ]; then
     mkdir -p "$BASE_DIR" || { echo "Failed to create $BASE_DIR" >&2; exit 1; }
 fi
@@ -367,6 +371,8 @@ find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/
 # File processing
 if [ "$COMPRESS" = true ]; then
     echo "if [ \"\$DUMP_MODE\" = false ] && [ \"\$VERIFY_MODE\" = false ] && [ \"\$RECALCULATE_HASH\" = false ]; then" >> "$OUTPUT_SCRIPT"
+    echo "    echo 'Ensuring directory $BASE_DIR exists before decompression...' >&2" >> "$OUTPUT_SCRIPT"
+    echo "    mkdir -p \"\$BASE_DIR\" || { echo \"Failed to create \$BASE_DIR for decompression\" >&2; exit 1; }" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decompressing large files (>1MB)...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    base64 -d <<'EOF' | gzip -d | tar -x -C \"\$BASE_DIR\" --strip-components=1" >> "$OUTPUT_SCRIPT"
     # Use absolute paths and filter only large files
