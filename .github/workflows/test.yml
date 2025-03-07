@@ -34,7 +34,7 @@ jobs:
       - name: Run RepoCapsule - Basic Test
         run: |
           chmod +x ./repocapsule.sh
-          ./repocapsule.sh testrepo
+          ./repocapsule.sh -b testrepo  # Added -b for binary support
           ls -la
           [ -f setup-testrepo.sh ] || { echo "Failed to generate setup-testrepo.sh"; exit 1; }
           ./setup-testrepo.sh
