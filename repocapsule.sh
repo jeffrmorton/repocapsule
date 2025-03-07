@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.1.5
+# Version: 1.1.6
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.1.5"
+VERSION="1.1.6"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -235,7 +235,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.1.5, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.1.6, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -383,31 +383,43 @@ if [ "$COMPRESS" = true ]; then
     # Compute hash of the base64 data for validation
     BASE64_HASH=$(md5sum "$TEMP_BASE64" | cut -d' ' -f1 || md5 -r "$TEMP_BASE64" | cut -d' ' -f1)
     log "INFO" "Base64 data hash: $BASE64_HASH"
-    # Embed the base64 data using a here-document with a unique delimiter
+    # Read the base64 data into a variable
+    BASE64_DATA=$(cat "$TEMP_BASE64")
     BASE64_LENGTH=$(wc -c < "$TEMP_BASE64")
     log "INFO" "Embedding base64 data (length: $BASE64_LENGTH bytes)"
+    # Embed the base64 data as a variable using printf
     echo "if [ \"\$DUMP_MODE\" = false ] && [ \"\$VERIFY_MODE\" = false ] && [ \"\$RECALCULATE_HASH\" = false ]; then" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Ensuring directory $BASE_DIR exists before decompression...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    mkdir -p \"\$BASE_DIR\" || { echo \"Failed to create \$BASE_DIR for decompression\" >&2; exit 1; }" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decompressing large files (>1MB)...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    TEMP_FILE=\$(mktemp)" >> "$OUTPUT_SCRIPT"
-    echo "    base64 -d <<'REPOCAPSULE_BASE64_END' > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
-    cat "$TEMP_BASE64" >> "$OUTPUT_SCRIPT"
-    echo "REPOCAPSULE_BASE64_END" >> "$OUTPUT_SCRIPT"
+    echo "    # Define the base64 data as a variable" >> "$OUTPUT_SCRIPT"
+    # Split the base64 data into chunks to avoid shell variable size limits
+    echo "    BASE64_DATA=\"\"" >> "$OUTPUT_SCRIPT"
+    # Split the data into manageable chunks (e.g., 1000000 characters each)
+    echo "$BASE64_DATA" | fold -w 1000000 | while IFS= read -r chunk; do
+        # Escape any double quotes in the chunk to prevent syntax errors
+        chunk=$(echo "$chunk" | sed 's/"/\\"/g')
+        echo "    BASE64_DATA=\"\$BASE64_DATA$chunk\"" >> "$OUTPUT_SCRIPT"
+    done
+    echo "    # Validate the embedded base64 data" >> "$OUTPUT_SCRIPT"
+    echo "    EMBEDDED_HASH=\$(echo -n \"\$BASE64_DATA\" | md5sum | cut -d' ' -f1 || echo -n \"\$BASE64_DATA\" | md5 -r | cut -d' ' -f1)" >> "$OUTPUT_SCRIPT"
+    echo "    echo 'Embedded base64 data hash: \$EMBEDDED_HASH' >&2" >> "$OUTPUT_SCRIPT"
+    echo "    EXPECTED_HASH='$BASE64_HASH'" >> "$OUTPUT_SCRIPT"
+    echo "    if [ \"\$EMBEDDED_HASH\" != \"\$EXPECTED_HASH\" ]; then" >> "$OUTPUT_SCRIPT"
+    echo "        echo 'Error: Embedded base64 data hash mismatch (expected: \$EXPECTED_HASH, got: \$EMBEDDED_HASH)' >&2" >> "$OUTPUT_SCRIPT"
+    echo "        exit 1" >> "$OUTPUT_SCRIPT"
+    echo "    fi" >> "$OUTPUT_SCRIPT"
+    echo "    # Decode the base64 data" >> "$OUTPUT_SCRIPT"
+    echo "    echo -n \"\$BASE64_DATA\" | base64 -d > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     echo "    sync" >> "$OUTPUT_SCRIPT"
     echo "    # Validate the decoded data size and hash" >> "$OUTPUT_SCRIPT"
     echo "    DECODED_SIZE=\$(wc -c < \$TEMP_FILE | cut -d' ' -f1)" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decoded data size: \$DECODED_SIZE bytes' >&2" >> "$OUTPUT_SCRIPT"
     echo "    DECODED_HASH=\$(md5sum \$TEMP_FILE | cut -d' ' -f1 || md5 -r \$TEMP_FILE | cut -d' ' -f1)" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decoded data hash: \$DECODED_HASH' >&2" >> "$OUTPUT_SCRIPT"
-    echo "    head -c 16 \$TEMP_FILE | xxd >&2" >> "$OUTPUT_SCRIPT"  # Log first 16 bytes for debugging
-    echo "    EXPECTED_HASH='$BASE64_HASH'" >> "$OUTPUT_SCRIPT"
-    echo "    if [ \"\$DECODED_HASH\" != \"\$EXPECTED_HASH\" ]; then" >> "$OUTPUT_SCRIPT"
-    echo "        echo 'Error: Decoded base64 data hash mismatch (expected: \$EXPECTED_HASH, got: \$DECODED_HASH)' >&2" >> "$OUTPUT_SCRIPT"
-    echo "        head -c 100 \$TEMP_FILE | xxd >&2" >> "$OUTPUT_SCRIPT"
-    echo "        rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
-    echo "        exit 1" >> "$OUTPUT_SCRIPT"
-    echo "    fi" >> "$OUTPUT_SCRIPT"
+    echo "    head -c 16 \$TEMP_FILE | xxd >&2" >> "$OUTPUT_SCRIPT"
+    echo "    # Note: The hash of the decoded data will differ from BASE64_HASH as BASE64_HASH is the hash of the base64 string" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Verifying temporary file content...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    if file \$TEMP_FILE | grep -q 'gzip compressed data'; then" >> "$OUTPUT_SCRIPT"
     echo "        echo 'Temporary file is a valid gzip archive' >&2" >> "$OUTPUT_SCRIPT"
