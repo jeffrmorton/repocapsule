@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.0.7
+# Version: 1.0.8
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.0.7"
+VERSION="1.0.8"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -235,7 +235,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.0.7, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.0.8, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -378,7 +378,8 @@ if [ "$COMPRESS" = true ]; then
     echo "    base64 -d <<'EOF' > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     # Use a single command to generate and encode the tarball, avoiding line breaks
     find "$(pwd)/$REPO_PATH" -type f -not -path "$(pwd)/$REPO_PATH/.git/*" -not -path "$(pwd)/$REPO_PATH/.git" -size +${COMPRESS_THRESHOLD}c -print0 | xargs -0 tar -czf - -T - | base64 -w 0 >> "$OUTPUT_SCRIPT"
-    echo "EOF" >> "$OUTPUT_SCRIPT"
+    echo "EOF" >> "$OUTPUT_SCRIPT"  # Ensure EOF is explicitly written
+    echo "    sync" >> "$OUTPUT_SCRIPT"  # Flush file to disk
     echo "    echo 'Verifying temporary file content...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    if file \$TEMP_FILE | grep -q 'gzip compressed data'; then" >> "$OUTPUT_SCRIPT"
     echo "        echo 'Temporary file is a valid gzip archive' >&2" >> "$OUTPUT_SCRIPT"
@@ -414,6 +415,13 @@ for chunk in chunk_*; do
     fi
 done
 rm "$TEMP_SCRIPT.files"
+
+# Validate the generated script syntax
+if ! bash -n "$OUTPUT_SCRIPT" 2>/dev/null; then
+    log "ERROR" "Generated script '$OUTPUT_SCRIPT' has syntax errors"
+    echo -e "${RED}Error: Generated script has syntax errors${NC}" >&2
+    exit 1
+fi
 
 # Finalize script
 cat <<'EOF' >> "$OUTPUT_SCRIPT"
