@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.0.9
+# Version: 1.1.0
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.0.9"
+VERSION="1.1.0"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -235,7 +235,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.0.9, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.1.0, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -380,12 +380,18 @@ if [ "$COMPRESS" = true ]; then
         rm -f "$TEMP_BASE64"
         exit 1
     fi
+    # Embed the base64 data using a here-document with escaping
+    BASE64_DATA=$(cat "$TEMP_BASE64")
+    BASE64_LENGTH=${#BASE64_DATA}
+    log "INFO" "Embedding base64 data (length: $BASE64_LENGTH bytes)"
     echo "if [ \"\$DUMP_MODE\" = false ] && [ \"\$VERIFY_MODE\" = false ] && [ \"\$RECALCULATE_HASH\" = false ]; then" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Ensuring directory $BASE_DIR exists before decompression...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    mkdir -p \"\$BASE_DIR\" || { echo \"Failed to create \$BASE_DIR for decompression\" >&2; exit 1; }" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decompressing large files (>1MB)...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    TEMP_FILE=\$(mktemp)" >> "$OUTPUT_SCRIPT"
-    echo "    printf '%s' \"$(cat "$TEMP_BASE64")\" | base64 -d > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
+    echo "    base64 -d <<'BASE64_EOF' > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
+    echo "$BASE64_DATA" >> "$OUTPUT_SCRIPT"
+    echo "BASE64_EOF" >> "$OUTPUT_SCRIPT"
     echo "    sync" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Verifying temporary file content...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    if file \$TEMP_FILE | grep -q 'gzip compressed data'; then" >> "$OUTPUT_SCRIPT"
