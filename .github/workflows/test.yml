@@ -34,13 +34,18 @@ jobs:
       - name: Run RepoCapsule - Basic Test
         run: |
           chmod +x ./repocapsule.sh
-          ./repocapsule.sh -b testrepo  # Added -b for binary support
+          ./repocapsule.sh -b -c testrepo  # Added -c for compression
           ls -la
           [ -f setup-testrepo.sh ] || { echo "Failed to generate setup-testrepo.sh"; exit 1; }
           ./setup-testrepo.sh
           ls -la testrepo
+          # Debug: Compare hashes manually
+          ORIGINAL_HASH=$(find testrepo -type f -not -path "testrepo/.git/*" -not -path "testrepo/.git" -exec cat {} + 2>/dev/null | tr -d '\r' | md5sum | cut -d' ' -f1)
+          REPRODUCED_HASH=$(find earthsync -type f -exec cat {} + 2>/dev/null | tr -d '\r' | md5sum | cut -d' ' -f1)
+          echo "Original Hash: $ORIGINAL_HASH"
+          echo "Reproduced Hash: $REPRODUCED_HASH"
           ./setup-testrepo.sh --verify || { echo "Verification failed"; exit 1; }
-          diff -r testrepo/ earthsync/ || { echo "Reproduced directory differs from original"; exit 1; }
+          diff -r --no-dereference --no-group --no-owner testrepo/ earthsync/ || { echo "Reproduced directory differs from original"; exit 1; }
 
       - name: Run RepoCapsule - Binary Support Test
         run: |
@@ -52,7 +57,7 @@ jobs:
           ./setup-testrepo.sh
           ls -la testrepo
           ./setup-testrepo.sh --verify || { echo "Verification failed with -b"; exit 1; }
-          diff -r testrepo/ earthsync/ || { echo "Reproduced directory differs with -b"; exit 1; }
+          diff -r --no-dereference --no-group --no-owner testrepo/ earthsync/ || { echo "Reproduced directory differs with -b"; exit 1; }
           [ -f earthsync/binary.bin ] || { echo "Binary file missing"; exit 1; }
 
       - name: Run RepoCapsule - Compression Test
@@ -65,7 +70,7 @@ jobs:
           ./setup-testrepo.sh
           ls -la testrepo
           ./setup-testrepo.sh --verify || { echo "Verification failed with -c"; exit 1; }
-          diff -r testrepo/ earthsync/ || { echo "Reproduced directory differs with -c"; exit 1; }
+          diff -r --no-dereference --no-group --no-owner testrepo/ earthsync/ || { echo "Reproduced directory differs with -c"; exit 1; }
           [ -f earthsync/largefile.bin ] || { echo "Large file missing"; exit 1; }
 
       - name: Backup testrepo for reuse
