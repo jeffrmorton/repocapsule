@@ -30,6 +30,12 @@ jobs:
           # Add a script
           echo "#!/bin/bash\necho Hello" > testrepo/script.sh
           chmod +x testrepo/script.sh
+          # Initialize testrepo as a Git repository
+          cd testrepo
+          git init
+          git add .
+          git commit -m "Initial commit"
+          cd ..
           # Verify test environment
           ls -la testrepo/ || { echo "Test environment setup failed"; exit 1; }
 
@@ -41,11 +47,14 @@ jobs:
       - name: Run RepoCapsule - Basic Test
         run: |
           chmod +x ./repocapsule.sh
-          ./repocapsule.sh -b -c testrepo
+          ./repocapsule.sh -b -c -v testrepo  # Added -v for verbose logging
           ls -la
           [ -f setup-testrepo.sh ] || { echo "Failed to generate setup-testrepo.sh"; exit 1; }
           ./setup-testrepo.sh
           ls -la testrepo
+          # Debug: List reproduced files
+          echo "Contents of earthsync:"
+          find earthsync -type f
           # Debug: Compare hashes manually
           ORIGINAL_HASH=$(find testrepo -type f -not -path "testrepo/.git/*" -not -path "testrepo/.git" -exec cat {} + 2>/dev/null | tr -d '\r' | md5sum | cut -d' ' -f1)
           REPRODUCED_HASH=$(find earthsync -type f -exec cat {} + 2>/dev/null | tr -d '\r' | md5sum | cut -d' ' -f1)

@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.0.0
+# Version: 1.0.1
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.0.0"
+VERSION="1.0.1"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -235,7 +235,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.0.0, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.0.1, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -358,6 +358,12 @@ if [ "$COMPRESS" = false ] || [ "$COMPRESS" = true ]; then
     fi
 fi
 
+# Debug: List files being processed
+log "INFO" "Files to be processed for compression (>=$COMPRESS_THRESHOLD bytes):"
+find "$(pwd)/$REPO_PATH" -type f -not -path "$(pwd)/$REPO_PATH/.git/*" -not -path "$(pwd)/$REPO_PATH/.git" -size +${COMPRESS_THRESHOLD}c -exec ls -l {} \; | while read -r line; do log "INFO" "$line"; done
+log "INFO" "Files to be processed without compression (<$COMPRESS_THRESHOLD bytes):"
+find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/.git" -size -${COMPRESS_THRESHOLD}c -exec ls -l {} \; | while read -r line; do log "INFO" "$line"; done
+
 # File processing
 if [ "$COMPRESS" = true ]; then
     echo "if [ \"\$DUMP_MODE\" = false ] && [ \"\$VERIFY_MODE\" = false ] && [ \"\$RECALCULATE_HASH\" = false ]; then" >> "$OUTPUT_SCRIPT"
@@ -369,6 +375,7 @@ if [ "$COMPRESS" = true ]; then
     echo "    echo 'Decompression complete.' >&2" >> "$OUTPUT_SCRIPT"
     echo "fi" >> "$OUTPUT_SCRIPT"
     log "INFO" "Embedding uncompressed files..."
+    # Ensure all small files are captured, including those not compressed
     find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/.git" -size -${COMPRESS_THRESHOLD}c > "$TEMP_SCRIPT.files"
 else
     log "INFO" "Embedding all files..."
