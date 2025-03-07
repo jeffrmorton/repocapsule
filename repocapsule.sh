@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.1.4
+# Version: 1.1.5
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.1.4"
+VERSION="1.1.5"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -99,7 +99,7 @@ create_file() {
     else
         echo "        if tr -d '\r' <<'BASE64_${rel_file//\//_}' | base64 -d > \"\$BASE_DIR/$rel_file\"; then" >> "$output"
         base64 "$file" | tr -d '\r' >> "$output"
-        echo "BASE64_${rel_file//\//_}" >> "$OUTPUT_SCRIPT"
+        echo "BASE64_${rel_file//\//_}" >> "$output"
     fi
     echo "            chmod $perms \"\$BASE_DIR/$rel_file\" 2>/dev/null || echo \"Warning: Failed to set permissions on \$BASE_DIR/$rel_file\" >&2" >> "$output"
     echo "            break" >> "$output"
@@ -235,7 +235,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.1.4, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.1.5, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -383,7 +383,7 @@ if [ "$COMPRESS" = true ]; then
     # Compute hash of the base64 data for validation
     BASE64_HASH=$(md5sum "$TEMP_BASE64" | cut -d' ' -f1 || md5 -r "$TEMP_BASE64" | cut -d' ' -f1)
     log "INFO" "Base64 data hash: $BASE64_HASH"
-    # Embed the base64 data using printf
+    # Embed the base64 data using a here-document with a unique delimiter
     BASE64_LENGTH=$(wc -c < "$TEMP_BASE64")
     log "INFO" "Embedding base64 data (length: $BASE64_LENGTH bytes)"
     echo "if [ \"\$DUMP_MODE\" = false ] && [ \"\$VERIFY_MODE\" = false ] && [ \"\$RECALCULATE_HASH\" = false ]; then" >> "$OUTPUT_SCRIPT"
@@ -391,13 +391,16 @@ if [ "$COMPRESS" = true ]; then
     echo "    mkdir -p \"\$BASE_DIR\" || { echo \"Failed to create \$BASE_DIR for decompression\" >&2; exit 1; }" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decompressing large files (>1MB)...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    TEMP_FILE=\$(mktemp)" >> "$OUTPUT_SCRIPT"
-    echo "    printf '%s' \"\$(cat $TEMP_BASE64)\" | base64 -d > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"  # Use printf to embed safely
+    echo "    base64 -d <<'REPOCAPSULE_BASE64_END' > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
+    cat "$TEMP_BASE64" >> "$OUTPUT_SCRIPT"
+    echo "REPOCAPSULE_BASE64_END" >> "$OUTPUT_SCRIPT"
     echo "    sync" >> "$OUTPUT_SCRIPT"
     echo "    # Validate the decoded data size and hash" >> "$OUTPUT_SCRIPT"
     echo "    DECODED_SIZE=\$(wc -c < \$TEMP_FILE | cut -d' ' -f1)" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decoded data size: \$DECODED_SIZE bytes' >&2" >> "$OUTPUT_SCRIPT"
     echo "    DECODED_HASH=\$(md5sum \$TEMP_FILE | cut -d' ' -f1 || md5 -r \$TEMP_FILE | cut -d' ' -f1)" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decoded data hash: \$DECODED_HASH' >&2" >> "$OUTPUT_SCRIPT"
+    echo "    head -c 16 \$TEMP_FILE | xxd >&2" >> "$OUTPUT_SCRIPT"  # Log first 16 bytes for debugging
     echo "    EXPECTED_HASH='$BASE64_HASH'" >> "$OUTPUT_SCRIPT"
     echo "    if [ \"\$DECODED_HASH\" != \"\$EXPECTED_HASH\" ]; then" >> "$OUTPUT_SCRIPT"
     echo "        echo 'Error: Decoded base64 data hash mismatch (expected: \$EXPECTED_HASH, got: \$DECODED_HASH)' >&2" >> "$OUTPUT_SCRIPT"
@@ -422,9 +425,6 @@ if [ "$COMPRESS" = true ]; then
     echo "    rm -f \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decompression complete.' >&2" >> "$OUTPUT_SCRIPT"
     echo "fi" >> "$OUTPUT_SCRIPT"
-    # Log a sample of the embedded base64 data for debugging
-    head -c 100 "$TEMP_BASE64" | xxd >> "$LOG_FILE"
-    log "INFO" "Sample of embedded base64 data logged to $LOG_FILE"
     rm -f "$TEMP_BASE64"
     log "INFO" "Embedding uncompressed files..."
     # Ensure all small files are captured, including those not compressed
