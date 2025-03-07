@@ -33,6 +33,8 @@ jobs:
           # Initialize testrepo as a Git repository
           cd testrepo
           git init
+          git config user.email "test@repocapsule.com"
+          git config user.name "RepoCapsule Test"
           git add .
           git commit -m "Initial commit"
           cd ..
