@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.1.8
+# Version: 1.1.9
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.1.8"
+VERSION="1.1.9"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -235,7 +235,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.1.8, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.1.9, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -243,7 +243,7 @@ if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
 fi
 
 set -e
-trap 'echo "Error occurred at line $LINENO, cleaning up..."; rm -rf "$BASE_DIR" "$BASE64_FILE" "$TEMP_FILE"; exit 1' ERR
+trap 'echo "Error occurred at line $LINENO, cleaning up..."; rm -rf "$BASE_DIR" "$TEMP_FILE"; exit 1' ERR
 
 REPO_NAME="REPO_NAME_PLACEHOLDER"
 REPO_VERSION="REPO_VERSION_PLACEHOLDER"
@@ -383,19 +383,19 @@ if [ "$COMPRESS" = true ]; then
     # Compute hash of the base64 data for validation
     BASE64_HASH=$(md5sum "$TEMP_BASE64" | cut -d' ' -f1 || md5 -r "$TEMP_BASE64" | cut -d' ' -f1)
     log "INFO" "Base64 data hash: $BASE64_HASH"
-    # Embed the base64 data as a file reference
+    # Generate a unique delimiter to avoid conflicts
+    DELIMITER="REPOCAPSULE_BASE64_END_$(uuidgen | tr -d '-' | cut -c 1-16)"
     BASE64_LENGTH=$(wc -c < "$TEMP_BASE64")
     log "INFO" "Embedding base64 data (length: $BASE64_LENGTH bytes)"
-    BASE64_FILE="${OUTPUT_SCRIPT}.base64"
-    cp "$TEMP_BASE64" "$BASE64_FILE"
     echo "if [ \"\$DUMP_MODE\" = false ] && [ \"\$VERIFY_MODE\" = false ] && [ \"\$RECALCULATE_HASH\" = false ]; then" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Ensuring directory $BASE_DIR exists before decompression...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    mkdir -p \"\$BASE_DIR\" || { echo \"Failed to create \$BASE_DIR for decompression\" >&2; exit 1; }" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Decompressing large files (>1MB)...' >&2" >> "$OUTPUT_SCRIPT"
     echo "    TEMP_FILE=\$(mktemp)" >> "$OUTPUT_SCRIPT"
-    echo "    # Copy the embedded base64 data to a temporary file for validation" >> "$OUTPUT_SCRIPT"
-    echo "    cp \"\${BASH_SOURCE%/*}/${BASE64_FILE##*/}\" \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
-    echo "    # Validate the embedded base64 data" >> "$OUTPUT_SCRIPT"
+    echo "    # Embed and validate the base64 data" >> "$OUTPUT_SCRIPT"
+    echo "    cat <<'$DELIMITER' > \$TEMP_FILE" >> "$OUTPUT_SCRIPT"
+    cat "$TEMP_BASE64" >> "$OUTPUT_SCRIPT"
+    echo "$DELIMITER" >> "$OUTPUT_SCRIPT"
     echo "    EMBEDDED_HASH=\$(md5sum \$TEMP_FILE | cut -d' ' -f1 || md5 -r \$TEMP_FILE | cut -d' ' -f1)" >> "$OUTPUT_SCRIPT"
     echo "    echo 'Embedded base64 data hash: \$EMBEDDED_HASH' >&2" >> "$OUTPUT_SCRIPT"
     echo "    EXPECTED_HASH='$BASE64_HASH'" >> "$OUTPUT_SCRIPT"
@@ -479,9 +479,6 @@ exit 0
 EOF
 
 chmod +x "$OUTPUT_SCRIPT"
-# Append the base64 data file
-cat "$BASE64_FILE" >> "$OUTPUT_SCRIPT"
-rm -f "$BASE64_FILE"
 log "INFO" "Generated script: $OUTPUT_SCRIPT"
 echo -e "${GREEN}Success! Generated: $OUTPUT_SCRIPT${NC}"
 echo "Run it with: ./setup-$BASENAME.sh [--dump|--update|--dry-run|--verify|--recalculate-hash|--retry-failed]"
