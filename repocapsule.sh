@@ -6,14 +6,14 @@
 #   - Enables reproduction of the directory structure and contents on any compatible system under a single top-level directory.
 #   - Supports LLM-driven updates by providing editable plain text sections, which can be re-encoded and executed.
 #   - Facilitates sharing, version control, and incremental updates for collaborative development.
-# Version: 1.2.4
+# Version: 1.2.5
 # License: MIT
 # Website: https://github.com/jeffrmorton/repocapsule
 # "Pack it, script it, ship it!"
 
 set -e
 
-VERSION="1.2.4"
+VERSION="1.2.5"
 DEFAULT_OUTPUT="setup"
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/repocapsule.log"
 CHUNK_SIZE=1000
@@ -236,7 +236,7 @@ cat <<'EOF' > "$TEMP_SCRIPT"
 # Git Commit: GIT_COMMIT_PLACEHOLDER
 # Docs: https://github.com/jeffrmorton/repocapsule
 # Changelog:
-# - Initial creation (RepoCapsule v1.2.4, CREATED_DATE_PLACEHOLDER)
+# - Initial creation (RepoCapsule v1.2.5, CREATED_DATE_PLACEHOLDER)
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     echo "Error: Bash 4.0 or higher required" >&2
@@ -274,20 +274,20 @@ verify_hash() {
     fi
     echo "Verification: Original Hash: $SOURCE_HASH" >&2
     echo "Verification: Reproduced Hash: $computed_hash" >&2
+    # Debug individual file hashes
+    echo "Debug: Individual file hash comparison:" >&2
+    for file in $(find "$REPO_NAME" -type f -not -path "$REPO_NAME/.git/*" -not -path "$REPO_NAME/.git"); do
+        rel_file=${file#"$REPO_NAME/"}
+        orig_file="$REPO_PATH/$rel_file"
+        if [ -f "$orig_file" ]; then
+            orig_hash=$(md5sum "$orig_file" | cut -d' ' -f1 || md5 -r "$orig_file" | cut -d' ' -f1)
+            repro_hash=$(md5sum "$file" | cut -d' ' -f1 || md5 -r "$file" | cut -d' ' -f1)
+            echo "  $rel_file: Original Hash: $orig_hash, Reproduced Hash: $repro_hash" >&2
+        fi
+    done
     if [ "$computed_hash" = "$SOURCE_HASH" ]; then
         echo "Verification successful: Hash matches ($SOURCE_HASH)" >&2
     else
-        # Debug individual file hashes
-        echo "Debug: Individual file hash comparison:" >&2
-        for file in $(find "$REPO_NAME" -type f -not -path "$REPO_NAME/.git/*" -not -path "$REPO_NAME/.git"); do
-            rel_file=${file#"$REPO_NAME/"}
-            orig_file="$REPO_PATH/$rel_file"
-            if [ -f "$orig_file" ]; then
-                orig_hash=$(md5sum "$orig_file" | cut -d' ' -f1 || md5 -r "$orig_file" | cut -d' ' -f1)
-                repro_hash=$(md5sum "$file" | cut -d' ' -f1 || md5 -r "$file" | cut -d' ' -f1)
-                echo "  $rel_file: Original Hash: $orig_hash, Reproduced Hash: $repro_hash" >&2
-            fi
-        done
         echo "Verification failed: Reproduced hash ($computed_hash) != original ($SOURCE_HASH)" >&2
         exit 1
     fi
@@ -378,7 +378,7 @@ fi
 
 # Debug: List files being processed
 log "INFO" "Files to be processed for compression (>=$COMPRESS_THRESHOLD bytes):"
-find "$(pwd)/$REPO_PATH" -type f -not -path "$(pwd)/$REPO_PATH/.git/*" -not -path "$(pwd)/$REPO_PATH/.git" -size +${COMPRESS_THRESHOLD}c -exec ls -l {} \; | while read -r line; do log "INFO" "$line"; done
+find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/.git" -size +${COMPRESS_THRESHOLD}c -exec ls -l {} \; | while read -r line; do log "INFO" "$line"; done
 log "INFO" "Files to be processed without compression (<$COMPRESS_THRESHOLD bytes):"
 find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/.git" -size -${COMPRESS_THRESHOLD}c -exec ls -l {} \; | while read -r line; do log "INFO" "$line"; done
 
@@ -386,7 +386,8 @@ find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/
 if [ "$COMPRESS" = true ]; then
     # Generate the compressed data into a temporary file first
     TEMP_BASE64=$(mktemp)
-    find "$(pwd)/$REPO_PATH" -type f -not -path "$(pwd)/$REPO_PATH/.git/*" -not -path "$(pwd)/$REPO_PATH/.git" -size +${COMPRESS_THRESHOLD}c -print0 | xargs -0 tar -czf - -T - | base64 -w 0 > "$TEMP_BASE64"
+    find "$REPO_PATH" -type f -not -path "$REPO_PATH/.git/*" -not -path "$REPO_PATH/.git" -size +${COMPRESS_THRESHOLD}c -print0 | \
+        xargs -0 tar -czf - -T - --transform 's|^\./||' | base64 -w 0 > "$TEMP_BASE64"
     # Validate the base64 data
     if ! base64 -d < "$TEMP_BASE64" | gzip -d >/dev/null 2>&1; then
         log "ERROR" "Generated base64 data for compressed files is invalid"
@@ -454,8 +455,8 @@ if [ "$COMPRESS" = true ]; then
     echo "        rm -f \$TEMP_FILE.gz" >> "$OUTPUT_SCRIPT"
     echo "        exit 1" >> "$OUTPUT_SCRIPT"
     echo "    fi" >> "$OUTPUT_SCRIPT"
-    echo "    # Decompress the tar archive" >> "$OUTPUT_SCRIPT"
-    echo "    if ! gzip -d -c \$TEMP_FILE.gz | tar -x -C \"\$BASE_DIR\"; then" >> "$OUTPUT_SCRIPT"
+    echo "    # Decompress the tar archive with relative paths" >> "$OUTPUT_SCRIPT"
+    echo "    if ! gzip -d -c \$TEMP_FILE.gz | tar -x --strip-components=1 -C \"\$BASE_DIR\"; then" >> "$OUTPUT_SCRIPT"
     echo "        echo \"Error: Failed to decompress large files\" >&2" >> "$OUTPUT_SCRIPT"
     echo "        rm -f \$TEMP_FILE.gz" >> "$OUTPUT_SCRIPT"
     echo "        exit 1" >> "$OUTPUT_SCRIPT"
