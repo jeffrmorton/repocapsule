@@ -1,5 +1,4 @@
 name: Test RepoCapsule
-
 on:
   push:
     branches: [main]
