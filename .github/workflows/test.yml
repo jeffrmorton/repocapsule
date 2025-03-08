@@ -22,7 +22,7 @@ jobs:
           head -c 1K /dev/urandom > testrepo/binary.bin
           cp testrepo/largefile.bin testrepo/largefile.bin.original
           cp testrepo/binary.bin testrepo/binary.bin.original
-          cat <<'EOF' > testrepo/.github/workflows/test.yml
+          cat <<EOF > testrepo/.github/workflows/test.yml
 name: Test RepoCapsule
 on:
   push:
@@ -63,7 +63,7 @@ EOF
           head -c 1K /dev/urandom > testrepo/binary.bin
           cp testrepo/largefile.bin testrepo/largefile.bin.original
           cp testrepo/binary.bin testrepo/binary.bin.original
-          cat <<'EOF' > testrepo/.github/workflows/test.yml
+          cat <<EOF > testrepo/.github/workflows/test.yml
 name: Test RepoCapsule
 on:
   push:
