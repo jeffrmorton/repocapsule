@@ -1,0 +1,739 @@
+# filename: .github/workflows/sequential_tests.yml
+name: RepoCapsule Sequential Tests
+
+defaults:
+  run:
+    shell: bash
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  # ===========================================
+  # Job 1: Lint the Generator Script
+  # ===========================================
+  lint-generator:
+    name: 1. Lint Generator Script
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install ShellCheck
+        run: |
+          echo "Updating package list..."
+          sudo apt-get update -qq
+          echo "Installing shellcheck..."
+          sudo apt-get install -y shellcheck
+          echo "ShellCheck installed: $(shellcheck --version)"
+      - name: Run ShellCheck on Generator
+        run: shellcheck repocapsule.sh
+
+  # ===========================================
+  # Job 2: Ubuntu Generation Tests
+  # ===========================================
+  test-generation-ubuntu:
+    name: 2. Test Generation (Ubuntu)
+    needs: lint-generator
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set Bash Executable Path (Ubuntu)
+        run: |
+          echo "BASH_EXEC=bash" >> $GITHUB_ENV
+          echo "Using Bash >= 4: $(bash --version)"
+
+      - name: Set Generator Executable
+        run: chmod +x repocapsule.sh
+
+      - name: Create Generation Test Source Directory
+        run: |
+          mkdir -p gen_test_src/subdir
+          echo "Hello World Ubuntu" > gen_test_src/file1.txt
+          echo "Another file Ubuntu" > gen_test_src/subdir/file2.log
+          echo "Metadata test Ubuntu" > gen_test_src/README.md # Will be excluded by default
+          echo "*.log" > gen_test_src/.gitignore      # Will be excluded by default
+          echo "Attempting to create dummy binary file..."
+          if head -c 1024 /dev/urandom > gen_test_src/binary.dat 2>/dev/null; then echo "Binary file created using /dev/urandom.";
+          elif dd if=/dev/zero of=gen_test_src/binary.dat bs=1024 count=1 2>/dev/null; then echo "Binary file created using dd fallback.";
+          else echo "::error::Failed to create dummy binary file."; exit 1; fi
+          echo "Created generation test source directory structure:"; ls -lR gen_test_src; echo "----------------------------------------"
+
+      - name: Basic Generation Test (Ubuntu)
+        run: |
+          set -x; echo "--- Running basic generation (Ubuntu) ---"
+          ${{ env.BASH_EXEC }} ./repocapsule.sh -v gen_test_src -n BasicTestUbuntu -o .
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Basic Generation failed! Exit code $ec"; exit $ec; fi
+          EXPECTED_SCRIPT="./setup-BasicTestUbuntu.sh"
+          test -f "$EXPECTED_SCRIPT" || { echo "::error::Expected script '$EXPECTED_SCRIPT' was not generated!"; ls -la .; exit 1; }
+          ls -l "$EXPECTED_SCRIPT"
+          ${{ env.BASH_EXEC }} -n "$EXPECTED_SCRIPT" || { echo "::error::Basic syntax check (bash -n) failed!"; exit 1; }
+          ${{ env.BASH_EXEC }} "$EXPECTED_SCRIPT" --dry-run || { echo "::error::Basic generation --dry-run failed!"; exit 1; }
+          echo "Basic generation test passed."; echo "----------------------------------------"
+
+      - name: Generation Test with Options (Ubuntu)
+        run: |
+          set -x; echo "--- Running generation with options (Ubuntu) ---"
+          OUTPUT_SUBDIR="./output_dir"; EXPECTED_SCRIPT="$OUTPUT_SUBDIR/setup-OptionsTestUbuntu.sh"; EXPECTED_INDEX="$EXPECTED_SCRIPT.index"
+          mkdir -p "$OUTPUT_SUBDIR"
+          ${{ env.BASH_EXEC }} ./repocapsule.sh -v -n OptionsTestUbuntu -V 1.2.3 -o "$OUTPUT_SUBDIR" -e "*.log" -e "binary.dat" -m "Custom Meta 1" -m "Another Meta Line" --create-index gen_test_src
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Generation with options failed! Exit code $ec"; exit $ec; fi
+          test -f "$EXPECTED_SCRIPT" || { echo "::error::Expected script '$EXPECTED_SCRIPT' was not generated!"; ls -la "$OUTPUT_SUBDIR"; exit 1; }
+          test -f "$EXPECTED_INDEX" || { echo "::error::Expected index file '$EXPECTED_INDEX' was not generated!"; ls -la "$OUTPUT_SUBDIR"; exit 1; }
+          ${{ env.BASH_EXEC }} -n "$EXPECTED_SCRIPT" || { echo "::error::Options syntax check failed!"; exit 1; }
+          ${{ env.BASH_EXEC }} "$EXPECTED_SCRIPT" --dry-run || { echo "::error::Options --dry-run failed!"; exit 1; }
+          echo "Generation with options tests passed."; echo "----------------------------------------"
+
+      - name: Generation Test with Git Include (Ubuntu - Simulated)
+        run: |
+          set -x; echo "--- Running generation with --include-git (Ubuntu) ---"
+          EXPECTED_SCRIPT="./setup-GitIncludeTestUbuntu.sh"
+          mkdir -p gen_test_src/.git/objects gen_test_src/.git/refs; echo "[core]" > gen_test_src/.git/config; echo "ref: refs/heads/main" > gen_test_src/.git/HEAD; echo "Simulated .git directory:"; ls -lA gen_test_src/.git
+          ${{ env.BASH_EXEC }} ./repocapsule.sh -v gen_test_src -n GitIncludeTestUbuntu -o . --include-git
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Git include generation failed! Exit code $ec"; exit $ec; fi
+          test -f "$EXPECTED_SCRIPT" || { echo "::error::Expected script '$EXPECTED_SCRIPT' was not generated!"; ls -la .; exit 1; }
+          ${{ env.BASH_EXEC }} -n "$EXPECTED_SCRIPT" || { echo "::error::Git include syntax check failed!"; exit 1; }
+          ${{ env.BASH_EXEC }} "$EXPECTED_SCRIPT" --dry-run || { echo "::error::Git include --dry-run failed!"; exit 1; }
+          ${{ env.BASH_EXEC }} "$EXPECTED_SCRIPT" --dump | grep -Fq ".git/config" || { echo "::error::'.git/config' NOT found in dump output!"; exit 1; }
+          echo "Generation with --include-git tests passed."; echo "----------------------------------------"
+
+      - name: Generation Test for Empty Directory (Ubuntu)
+        run: |
+          set -x; echo "--- Running generation on empty directory (Ubuntu) ---"
+          EXPECTED_SCRIPT="./setup-EmptyTestUbuntu.sh"; mkdir empty_src
+          ${{ env.BASH_EXEC }} ./repocapsule.sh -v empty_src -n EmptyTestUbuntu -o .
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Empty dir generation failed! Exit code $ec"; exit $ec; fi
+          test -f "$EXPECTED_SCRIPT" || { echo "::error::Expected script '$EXPECTED_SCRIPT' was not generated!"; ls -la .; exit 1; }
+          ${{ env.BASH_EXEC }} -n "$EXPECTED_SCRIPT" || { echo "::error::Empty dir syntax check failed!"; exit 1; }
+          ${{ env.BASH_EXEC }} "$EXPECTED_SCRIPT" --dry-run || { echo "::error::Empty dir --dry-run failed!"; exit 1; }
+          echo "Generation for empty directory tests passed."; echo "----------------------------------------"
+
+      - name: Cleanup Generation Test Files (Ubuntu)
+        if: always()
+        run: |
+          echo "--- Cleaning up Generation Test Files (Ubuntu) ---"
+          rm -rf gen_test_src empty_src output_dir setup-*.sh*
+          echo "Cleanup finished."
+
+  # ===========================================
+  # Job 3: Ubuntu Capsule Functionality Tests
+  # ===========================================
+  test-functionality-ubuntu:
+    name: 3. Test Functionality (Ubuntu)
+    needs: test-generation-ubuntu # Depends on previous Ubuntu job
+    runs-on: ubuntu-latest
+    outputs: # Define outputs to potentially pass info if needed later
+      capsule_script_path: ${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set Bash Executable Path (Ubuntu)
+        run: |
+          echo "BASH_EXEC=bash" >> $GITHUB_ENV
+          echo "Using Bash >= 4: $(bash --version)"
+
+      - name: Set Generator Executable
+        run: chmod +x repocapsule.sh
+
+      - name: Create Functionality Test Source Directory
+        id: setup_func_src # Use different id
+        run: |
+          mkdir -p func_src/subdir
+          echo "Hello Capsule Ubuntu" > func_src/file1.txt
+          echo "Subdir Content Ubuntu" > func_src/subdir/file2.log # Excluded
+          echo "Another text file Ubuntu" > func_src/subdir/another.txt
+          echo "Creating binary test file..."
+          if head -c 512 /dev/urandom > func_src/subdir/small_bin.dat 2>/dev/null; then echo "Binary created with urandom.";
+          elif dd if=/dev/zero of=func_src/subdir/small_bin.dat bs=512 count=1 2>/dev/null; then echo "Binary created with dd.";
+          else echo "::error::Failed to create binary test file."; exit 1; fi
+          # Set outputs for use within this job
+          echo "FUNC_SOURCE_DIR=func_src" >> $GITHUB_ENV
+          echo "FUNC_OUTPUT_DIR=func_test_out" >> $GITHUB_ENV
+          echo "EXCLUDED_FILE_PATH=func_src/subdir/file2.log" >> $GITHUB_ENV
+          echo "FILE_TO_MODIFY=func_src/file1.txt" >> $GITHUB_ENV # Store full path for now
+          echo "FILE_TO_DELETE=func_src/subdir/another.txt" >> $GITHUB_ENV # Store full path for now
+          echo "--- Functionality Source Directory Structure (Ubuntu) ---"; ls -lR func_src; echo "----------------------------------------"
+
+      - name: Generate Test Capsule for Functionality Tests
+        id: generate-func-capsule # Use different id
+        run: |
+          echo "--- Generating Capsule Script for Functionality Tests (Ubuntu) ---"
+          CAPSULE_NAME="TestCapsuleUbuntu"
+          ${{ env.BASH_EXEC }} ./repocapsule.sh "${{ env.FUNC_SOURCE_DIR }}" -n "$CAPSULE_NAME" -o . -e "*.log" --metadata "Test Project Ubuntu" --metadata "CI Run: ${{ github.run_id }}"
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Generator script failed! Exit code $ec."; exit 1; fi
+          CAPSULE_PATH="./setup-${CAPSULE_NAME}.sh"
+          if [[ -f "$CAPSULE_PATH" ]]; then echo "Capsule generated: $CAPSULE_PATH"; ls -l "$CAPSULE_PATH"; echo "CAPSULE_SCRIPT=$CAPSULE_PATH" >> $GITHUB_OUTPUT;
+          else echo "::error::Expected script '$CAPSULE_PATH' not found!"; ls -la .; exit 1; fi
+          echo "----------------------------------------"
+
+      - name: Set Generated Script Executable
+        run: |
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          if [[ -n "$CAPSULE_SCRIPT" && -f "$CAPSULE_SCRIPT" ]]; then chmod +x "$CAPSULE_SCRIPT"; ls -l "$CAPSULE_SCRIPT"; else echo "::error::Capsule script '$CAPSULE_SCRIPT' not found or variable not set!"; exit 1; fi
+
+      - name: Install ShellCheck
+        run: |
+          echo "Updating package list..."
+          sudo apt-get update -qq
+          echo "Installing shellcheck..."
+          sudo apt-get install -y shellcheck
+          echo "ShellCheck installed: $(shellcheck --version)"
+
+      - name: Lint Generated Capsule
+        run: |
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          echo "Linting generated script: $CAPSULE_SCRIPT"
+          shellcheck "$CAPSULE_SCRIPT"
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Shellcheck failed on generated script '$CAPSULE_SCRIPT'! Exit code $ec."; exit 1; fi
+          echo "Shellcheck passed on generated script."
+          echo "----------------------------------------"
+
+      - name: Test Basic Extraction and Exclusions (Ubuntu)
+        run: |
+          echo "--- Testing basic extraction (Ubuntu) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          TARGET_DIR="${{ env.FUNC_OUTPUT_DIR }}"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR"
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Capsule script failed basic extraction! Exit code $ec."; exit 1; fi
+          echo "--- Contents of '$TARGET_DIR': ---"; ls -lR "$TARGET_DIR"
+          echo "--- Verifying files ---"
+          test -f "$TARGET_DIR/file1.txt" || (echo "::error::file1.txt missing!" && exit 1)
+          test -f "$TARGET_DIR/subdir/another.txt" || (echo "::error::subdir/another.txt missing!" && exit 1)
+          test -f "$TARGET_DIR/subdir/small_bin.dat" || (echo "::error::subdir/small_bin.dat missing!" && exit 1)
+          if test -f "$TARGET_DIR/subdir/file2.log"; then echo "::error::Excluded file subdir/file2.log was extracted!"; exit 1; else echo "Excluded file correctly absent."; fi
+          echo "Basic extraction passed."; echo "----------------------------------------"
+
+      - name: Test Content Integrity (Capsule Diff vs Modified Source - Ubuntu)
+        run: |
+          echo "--- Testing content integrity via capsule --diff (Ubuntu) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          SOURCE_DIR="${{ env.FUNC_SOURCE_DIR }}"
+          EXCLUDED_FILE_PATH="${{ env.EXCLUDED_FILE_PATH }}"
+          echo "Temporarily removing excluded file '$EXCLUDED_FILE_PATH' from '$SOURCE_DIR'"
+          if [[ -f "$EXCLUDED_FILE_PATH" ]]; then mv "$EXCLUDED_FILE_PATH" "${EXCLUDED_FILE_PATH}.bak"; else echo "Warning: Excluded file not found."; fi
+          echo "Running capsule's internal diff against modified source '$SOURCE_DIR'"
+          set +e; ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --diff "$SOURCE_DIR"; ec=$?; set -e
+          if [[ -f "${EXCLUDED_FILE_PATH}.bak" ]]; then echo "Restoring excluded file"; mv "${EXCLUDED_FILE_PATH}.bak" "$EXCLUDED_FILE_PATH"; fi
+          if [[ $ec -eq 0 ]]; then echo "Internal --diff correctly reported no differences.";
+          elif [[ $ec -eq 1 ]]; then echo "::error::Internal --diff reported differences unexpectedly!"; exit 1;
+          else echo "::error::Internal --diff failed! Exit code $ec"; exit 1; fi
+          echo "Capsule diff check passed."; echo "----------------------------------------"
+
+      - name: Test Generated Script --verify command (Ubuntu)
+        run: |
+          echo "--- Testing generated script's --verify command (Ubuntu) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          TARGET_DIR="${{ env.FUNC_OUTPUT_DIR }}"
+          echo "Running: ${{ env.BASH_EXEC }} $CAPSULE_SCRIPT --target-dir $TARGET_DIR --verify"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --verify
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Capsule script --verify failed! Exit code $ec."; exit 1; fi
+          echo "--verify command check passed."; echo "----------------------------------------"
+
+      - name: Test Generated Script --recalculate-hash command (Ubuntu)
+        run: |
+          echo "--- Testing --recalculate-hash command (Ubuntu) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          TARGET_DIR="${{ env.FUNC_OUTPUT_DIR }}"
+          FUNC_SOURCE_DIR="${{ env.FUNC_SOURCE_DIR }}"
+          FILE_TO_MODIFY="${{ env.FILE_TO_MODIFY }}"
+          # Perform path manipulation within the script block
+          FILE_TO_MODIFY_REL="${FILE_TO_MODIFY#$FUNC_SOURCE_DIR/}"
+          FILE_TO_MODIFY_ABS="$TARGET_DIR/$FILE_TO_MODIFY_REL"
+
+          echo "1. Initial verify (should pass)"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --verify || exit 1
+
+          echo "2. Modifying file: $FILE_TO_MODIFY_ABS"
+          echo "Modification line" >> "$FILE_TO_MODIFY_ABS"
+          ls -l "$FILE_TO_MODIFY_ABS"
+
+          echo "3. Verify after modification (should fail)"
+          set +e; ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --verify; ec=$?; set -e
+          if [[ $ec -eq 0 ]]; then echo "::error::Verify unexpectedly passed after modification!"; exit 1; else echo "Verify correctly failed (exit code $ec)."; fi
+
+          echo "4. Recalculating hash (using yes pipe)"
+          set +o pipefail # Temporarily disable pipefail for this command
+          yes | ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --recalculate-hash
+          recalc_ec=$? # Capture capsule script exit code specifically
+          set -o pipefail # Re-enable pipefail
+          if [[ $recalc_ec -ne 0 ]]; then echo "::error::Recalculate hash command failed! Exit code $recalc_ec."; exit 1; fi
+
+          echo "5. Final verify (should pass)"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --verify || exit 1
+
+          echo "--recalculate-hash test passed."; echo "----------------------------------------"
+
+      - name: Test Generated Script --retry-failed command (Ubuntu)
+        run: |
+          echo "--- Testing --retry-failed command (Ubuntu - Simulation) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          TARGET_DIR="${{ env.FUNC_OUTPUT_DIR }}"
+          FUNC_SOURCE_DIR="${{ env.FUNC_SOURCE_DIR }}"
+          FILE_TO_DELETE="${{ env.FILE_TO_DELETE }}"
+          # Perform path manipulation within the script block
+          FILE_TO_DELETE_REL="${FILE_TO_DELETE#$FUNC_SOURCE_DIR/}"
+          FILE_TO_DELETE_ABS="$TARGET_DIR/$FILE_TO_DELETE_REL"
+          CAPSULE_BACKUP="${CAPSULE_SCRIPT}.bak.retrytest"
+
+          echo "1. Ensure target file exists: $FILE_TO_DELETE_ABS"
+          test -f "$FILE_TO_DELETE_ABS" || { echo "::error::File to delete does not exist initially!"; ls -lR "$TARGET_DIR"; exit 1; }
+
+          echo "2. Deleting file to simulate failure: $FILE_TO_DELETE_ABS"
+          rm "$FILE_TO_DELETE_ABS"
+          test ! -f "$FILE_TO_DELETE_ABS" || { echo "::error::File deletion failed!"; exit 1; }
+
+          echo "3. Modifying capsule script to populate FAILED_FILES array"
+          cp "$CAPSULE_SCRIPT" "$CAPSULE_BACKUP" || exit 1
+          # Construct the absolute path as the generated script would see it
+          # Need to resolve the target directory's absolute path first
+          TARGET_DIR_ABS=$(realpath "$TARGET_DIR") # Use realpath for robustness
+          if [[ -z "$TARGET_DIR_ABS" ]]; then echo "::error::Could not determine absolute target path from script output."; exit 1; fi
+          FAILED_FILE_ENTRY="$TARGET_DIR_ABS/$FILE_TO_DELETE_REL"
+          # Use # as sed separator to avoid issues with / in paths
+          # Escape potential special characters in the path for sed
+          FAILED_FILE_ENTRY_ESC=$(sed -e 's/[&\\#]/\\&/g' <<< "$FAILED_FILE_ENTRY")
+          # Replace 'declare -a FAILED_FILES=()' with the populated version
+          sed -i.sedbak "s#^declare -a FAILED_FILES=()\$#declare -a FAILED_FILES=(\"$FAILED_FILE_ENTRY_ESC\")#" "$CAPSULE_SCRIPT" || exit 1
+          rm -f "${CAPSULE_SCRIPT}.sedbak"
+          echo "--- Modified FAILED_FILES line: ---"
+          grep 'declare -a FAILED_FILES=' "$CAPSULE_SCRIPT"
+          echo "---------------------------------"
+
+          echo "4. Running --retry-failed"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --retry-failed
+          retry_ec=$?; if [[ $retry_ec -ne 0 ]]; then echo "::error::Retry failed command failed! Exit code $retry_ec."; mv "$CAPSULE_BACKUP" "$CAPSULE_SCRIPT"; exit 1; fi
+
+          echo "5. Verifying file now exists: $FILE_TO_DELETE_ABS"
+          test -f "$FILE_TO_DELETE_ABS" || { echo "::error::File was not recreated by --retry-failed!"; ls -lR "$TARGET_DIR"; mv "$CAPSULE_BACKUP" "$CAPSULE_SCRIPT"; exit 1; }
+
+          echo "6. Restoring original capsule script"
+          mv "$CAPSULE_BACKUP" "$CAPSULE_SCRIPT" || exit 1
+
+          echo "--retry-failed test passed."; echo "----------------------------------------"
+
+
+      - name: Test Generated Script --dry-run command (Ubuntu)
+        run: |
+           echo "--- Testing generated script's --dry-run command (Ubuntu) ---"
+           CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+           echo "Running: ${{ env.BASH_EXEC }} $CAPSULE_SCRIPT --dry-run"
+           ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --dry-run
+           ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Capsule script --dry-run failed! Exit code $ec."; exit 1; fi
+           echo "--dry-run command check passed."; echo "----------------------------------------"
+
+      - name: Test Generated Script --dump command (Ubuntu)
+        run: |
+          echo "--- Testing generated script's --dump command (Ubuntu) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          DUMP_OUTPUT_FILE="dump_output_ubuntu.txt"
+          echo "Running: ${{ env.BASH_EXEC }} $CAPSULE_SCRIPT --dump > $DUMP_OUTPUT_FILE"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --dump > "$DUMP_OUTPUT_FILE"
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Capsule script --dump failed! Exit code $ec."; exit 1; fi
+          echo "--- Dump Output Contents: ---"; cat "$DUMP_OUTPUT_FILE"; echo "--- End Dump Output ---"
+          echo "Verifying dump content..."
+          grep -Fq "file1.txt" "$DUMP_OUTPUT_FILE" || (echo "::error::Dump missing file1.txt!" && exit 1)
+          grep -Fq "subdir/another.txt" "$DUMP_OUTPUT_FILE" || (echo "::error::Dump missing subdir/another.txt!" && exit 1)
+          grep -Fq "subdir/small_bin.dat" "$DUMP_OUTPUT_FILE" || (echo "::error::Dump missing subdir/small_bin.dat!" && exit 1)
+          if grep -Fq "subdir/file2.log"; then echo "::error::Dump includes excluded file subdir/file2.log!"; exit 1; else echo "Verified excluded file absent from dump."; fi
+          echo "Dump command content checks passed."; echo "----------------------------------------"
+
+      - name: Check for Marker in Generated Script (Ubuntu - Sanity Check)
+        run: |
+          echo "--- Checking for specific embedding marker (Ubuntu - Sanity Check) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          MARKER="# <<< BEGIN FILE: file1.txt >>>"
+          echo "Searching for marker: '$MARKER'"
+          if grep -Fq "$MARKER" "$CAPSULE_SCRIPT"; then echo "Marker '$MARKER' found.";
+          else echo "::error file=$CAPSULE_SCRIPT::Marker '$MARKER' NOT FOUND!"; head -n 50 "$CAPSULE_SCRIPT" || true; exit 1; fi
+          echo "----------------------------------------"
+
+      - name: Test Generated Script --update command (Ubuntu - Idempotency Check)
+        run: |
+          echo "--- Testing --update command (Ubuntu) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          TARGET_DIR="${{ env.FUNC_OUTPUT_DIR }}"
+          echo "Running: ${{ env.BASH_EXEC }} $CAPSULE_SCRIPT --target-dir $TARGET_DIR --update"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --update
+           ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Capsule script --update failed! Exit code $ec."; exit 1; fi
+          echo "--update command ran successfully."; echo "----------------------------------------"
+
+      - name: Cleanup Functionality Test Files (Ubuntu)
+        if: always()
+        run: |
+          echo "--- Cleaning up Functionality Test Files (Ubuntu) ---"
+          ls -la . || true
+          SOURCE_DIR="${{ env.FUNC_SOURCE_DIR }}"
+          OUTPUT_DIR="${{ env.FUNC_OUTPUT_DIR }}"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          EXCLUDED_FILE_BAK="${{ env.EXCLUDED_FILE_PATH }}.bak"
+          CAPSULE_RETRY_BAK="${CAPSULE_SCRIPT}.bak.retrytest"
+          echo "Removing source dir: $SOURCE_DIR"; rm -rf "$SOURCE_DIR"
+          if [[ -f "$EXCLUDED_FILE_BAK" ]]; then echo "Removing backup excluded file: $EXCLUDED_FILE_BAK"; rm -f "$EXCLUDED_FILE_BAK"; fi
+          echo "Removing output dir: $OUTPUT_DIR"; rm -rf "$OUTPUT_DIR"
+          if [[ -n "$CAPSULE_SCRIPT" ]]; then echo "Removing capsule script: $CAPSULE_SCRIPT"; rm -f "$CAPSULE_SCRIPT"; fi
+          if [[ -f "$CAPSULE_RETRY_BAK" ]]; then echo "Removing retry test backup: $CAPSULE_RETRY_BAK"; rm -f "$CAPSULE_RETRY_BAK"; fi
+          rm -f dump_output_ubuntu.txt;
+          echo "Cleanup complete. Remaining files:"; ls -la . || true
+
+  # ===========================================
+  # Job 4: macOS Generation Tests
+  # ===========================================
+  test-generation-macos:
+    name: 4. Test Generation (macOS)
+    needs: test-functionality-ubuntu # Depends on previous Ubuntu job
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies (macOS)
+        run: brew install bash coreutils
+
+      - name: Set Bash Executable Path (macOS)
+        run: |
+          if [[ -x "/opt/homebrew/bin/bash" ]]; then BASH_PATH="/opt/homebrew/bin/bash"; # Apple Silicon
+          elif [[ -x "/usr/local/bin/bash" ]]; then BASH_PATH="/usr/local/bin/bash"; # Intel
+          else echo "::error::Could not find brew-installed bash"; exit 1; fi
+          echo "BASH_EXEC=${BASH_PATH}" >> $GITHUB_ENV
+          echo "Using Bash >= 4: $(${BASH_PATH} --version)"
+
+      - name: Set Generator Executable
+        run: chmod +x repocapsule.sh
+
+      - name: Create Generation Test Source Directory
+        run: |
+          mkdir -p gen_test_src/subdir
+          echo "Hello World macOS" > gen_test_src/file1.txt
+          echo "Another file macOS" > gen_test_src/subdir/file2.log
+          echo "Metadata test macOS" > gen_test_src/README.md # Will be excluded by default
+          echo "*.log" > gen_test_src/.gitignore      # Will be excluded by default
+          echo "Attempting to create dummy binary file..."
+          if head -c 1024 /dev/urandom > gen_test_src/binary.dat 2>/dev/null; then echo "Binary file created using /dev/urandom.";
+          elif dd if=/dev/zero of=gen_test_src/binary.dat bs=1024 count=1 2>/dev/null; then echo "Binary file created using dd fallback.";
+          else echo "::error::Failed to create dummy binary file."; exit 1; fi
+          echo "Created generation test source directory structure:"; ls -lR gen_test_src; echo "----------------------------------------"
+
+      - name: Basic Generation Test (macOS)
+        run: |
+          set -x; echo "--- Running basic generation (macOS) ---"
+          ${{ env.BASH_EXEC }} ./repocapsule.sh -v gen_test_src -n BasicTestMac -o .
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Basic Generation failed! Exit code $ec"; exit $ec; fi
+          EXPECTED_SCRIPT="./setup-BasicTestMac.sh"
+          test -f "$EXPECTED_SCRIPT" || { echo "::error::Expected script '$EXPECTED_SCRIPT' was not generated!"; ls -la .; exit 1; }
+          ls -l "$EXPECTED_SCRIPT"
+          ${{ env.BASH_EXEC }} -n "$EXPECTED_SCRIPT" || { echo "::error::Basic syntax check (bash -n) failed!"; exit 1; }
+          ${{ env.BASH_EXEC }} "$EXPECTED_SCRIPT" --dry-run || { echo "::error::Basic generation --dry-run failed!"; exit 1; }
+          echo "Basic generation test passed."; echo "----------------------------------------"
+
+      - name: Generation Test with Options (macOS)
+        run: |
+          set -x; echo "--- Running generation with options (macOS) ---"
+          OUTPUT_SUBDIR="./output_dir"; EXPECTED_SCRIPT="$OUTPUT_SUBDIR/setup-OptionsTestMac.sh"; EXPECTED_INDEX="$EXPECTED_SCRIPT.index"
+          mkdir -p "$OUTPUT_SUBDIR"
+          ${{ env.BASH_EXEC }} ./repocapsule.sh -v -n OptionsTestMac -V 1.2.3 -o "$OUTPUT_SUBDIR" -e "*.log" -e "binary.dat" -m "Custom Meta 1" -m "Another Meta Line" --create-index gen_test_src
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Generation with options failed! Exit code $ec"; exit $ec; fi
+          test -f "$EXPECTED_SCRIPT" || { echo "::error::Expected script '$EXPECTED_SCRIPT' was not generated!"; ls -la "$OUTPUT_SUBDIR"; exit 1; }
+          test -f "$EXPECTED_INDEX" || { echo "::error::Expected index file '$EXPECTED_INDEX' was not generated!"; ls -la "$OUTPUT_SUBDIR"; exit 1; }
+          ${{ env.BASH_EXEC }} -n "$EXPECTED_SCRIPT" || { echo "::error::Options syntax check failed!"; exit 1; }
+          ${{ env.BASH_EXEC }} "$EXPECTED_SCRIPT" --dry-run || { echo "::error::Options --dry-run failed!"; exit 1; }
+          echo "Generation with options tests passed."; echo "----------------------------------------"
+
+      - name: Generation Test with Git Include (macOS - Simulated)
+        run: |
+          set -x; echo "--- Running generation with --include-git (macOS) ---"
+          EXPECTED_SCRIPT="./setup-GitIncludeTestMac.sh"
+          mkdir -p gen_test_src/.git/objects gen_test_src/.git/refs; echo "[core]" > gen_test_src/.git/config; echo "ref: refs/heads/main" > gen_test_src/.git/HEAD; echo "Simulated .git directory:"; ls -lA gen_test_src/.git
+          ${{ env.BASH_EXEC }} ./repocapsule.sh -v gen_test_src -n GitIncludeTestMac -o . --include-git
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Git include generation failed! Exit code $ec"; exit $ec; fi
+          test -f "$EXPECTED_SCRIPT" || { echo "::error::Expected script '$EXPECTED_SCRIPT' was not generated!"; ls -la .; exit 1; }
+          ${{ env.BASH_EXEC }} -n "$EXPECTED_SCRIPT" || { echo "::error::Git include syntax check failed!"; exit 1; }
+          ${{ env.BASH_EXEC }} "$EXPECTED_SCRIPT" --dry-run || { echo "::error::Git include --dry-run failed!"; exit 1; }
+          ${{ env.BASH_EXEC }} "$EXPECTED_SCRIPT" --dump | grep -Fq ".git/config" || { echo "::error::'.git/config' NOT found in dump output!"; exit 1; }
+          echo "Generation with --include-git tests passed."; echo "----------------------------------------"
+
+      - name: Generation Test for Empty Directory (macOS)
+        run: |
+          set -x; echo "--- Running generation on empty directory (macOS) ---"
+          EXPECTED_SCRIPT="./setup-EmptyTestMac.sh"; mkdir empty_src
+          ${{ env.BASH_EXEC }} ./repocapsule.sh -v empty_src -n EmptyTestMac -o .
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Empty dir generation failed! Exit code $ec"; exit $ec; fi
+          test -f "$EXPECTED_SCRIPT" || { echo "::error::Expected script '$EXPECTED_SCRIPT' was not generated!"; ls -la .; exit 1; }
+          ${{ env.BASH_EXEC }} -n "$EXPECTED_SCRIPT" || { echo "::error::Empty dir syntax check failed!"; exit 1; }
+          ${{ env.BASH_EXEC }} "$EXPECTED_SCRIPT" --dry-run || { echo "::error::Empty dir --dry-run failed!"; exit 1; }
+          echo "Generation for empty directory tests passed."; echo "----------------------------------------"
+
+      - name: Cleanup Generation Test Files (macOS)
+        if: always()
+        run: |
+          echo "--- Cleaning up Generation Test Files (macOS) ---"
+          rm -rf gen_test_src empty_src output_dir setup-*.sh*
+          echo "Cleanup finished."
+
+  # ===========================================
+  # Job 5: macOS Capsule Functionality Tests
+  # ===========================================
+  test-functionality-macos:
+    name: 5. Test Functionality (macOS)
+    needs: test-generation-macos # Depends on previous macOS job
+    runs-on: macos-latest
+    outputs: # Define outputs to potentially pass info if needed later
+      capsule_script_path: ${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies (macOS)
+        run: brew install bash coreutils shellcheck # Include shellcheck here
+
+      - name: Set Bash Executable Path (macOS)
+        run: |
+          if [[ -x "/opt/homebrew/bin/bash" ]]; then BASH_PATH="/opt/homebrew/bin/bash"; # Apple Silicon
+          elif [[ -x "/usr/local/bin/bash" ]]; then BASH_PATH="/usr/local/bin/bash"; # Intel
+          else echo "::error::Could not find brew-installed bash"; exit 1; fi
+          echo "BASH_EXEC=${BASH_PATH}" >> $GITHUB_ENV
+          echo "Using Bash >= 4: $(${BASH_PATH} --version)"
+
+      - name: Set Generator Executable
+        run: chmod +x repocapsule.sh
+
+      - name: Create Functionality Test Source Directory
+        id: setup_func_src # Use different id
+        run: |
+          mkdir -p func_src/subdir
+          echo "Hello Capsule macOS" > func_src/file1.txt
+          echo "Subdir Content macOS" > func_src/subdir/file2.log # Excluded
+          echo "Another text file macOS" > func_src/subdir/another.txt
+          echo "Creating binary test file..."
+          if head -c 512 /dev/urandom > func_src/subdir/small_bin.dat 2>/dev/null; then echo "Binary created with urandom.";
+          elif dd if=/dev/zero of=func_src/subdir/small_bin.dat bs=512 count=1 2>/dev/null; then echo "Binary created with dd.";
+          else echo "::error::Failed to create binary test file."; exit 1; fi
+          # Set outputs for use within this job
+          echo "FUNC_SOURCE_DIR=func_src" >> $GITHUB_ENV
+          echo "FUNC_OUTPUT_DIR=func_test_out" >> $GITHUB_ENV
+          echo "EXCLUDED_FILE_PATH=func_src/subdir/file2.log" >> $GITHUB_ENV
+          echo "FILE_TO_MODIFY=func_src/file1.txt" >> $GITHUB_ENV # Store full path for now
+          echo "FILE_TO_DELETE=func_src/subdir/another.txt" >> $GITHUB_ENV # Store full path for now
+          echo "--- Functionality Source Directory Structure (macOS) ---"; ls -lR func_src; echo "----------------------------------------"
+
+      - name: Generate Test Capsule for Functionality Tests
+        id: generate-func-capsule # Use different id
+        run: |
+          echo "--- Generating Capsule Script for Functionality Tests (macOS) ---"
+          CAPSULE_NAME="TestCapsuleMac"
+          ${{ env.BASH_EXEC }} ./repocapsule.sh "${{ env.FUNC_SOURCE_DIR }}" -n "$CAPSULE_NAME" -o . -e "*.log" --metadata "Test Project macOS" --metadata "CI Run: ${{ github.run_id }}"
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Generator script failed! Exit code $ec."; exit 1; fi
+          CAPSULE_PATH="./setup-${CAPSULE_NAME}.sh"
+          if [[ -f "$CAPSULE_PATH" ]]; then echo "Capsule generated: $CAPSULE_PATH"; ls -l "$CAPSULE_PATH"; echo "CAPSULE_SCRIPT=$CAPSULE_PATH" >> $GITHUB_OUTPUT;
+          else echo "::error::Expected script '$CAPSULE_PATH' not found!"; ls -la .; exit 1; fi
+          echo "----------------------------------------"
+
+      - name: Set Generated Script Executable
+        run: |
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          if [[ -n "$CAPSULE_SCRIPT" && -f "$CAPSULE_SCRIPT" ]]; then chmod +x "$CAPSULE_SCRIPT"; ls -l "$CAPSULE_SCRIPT"; else echo "::error::Capsule script '$CAPSULE_SCRIPT' not found or variable not set!"; exit 1; fi
+
+      - name: Lint Generated Capsule
+        run: |
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          echo "Linting generated script: $CAPSULE_SCRIPT"
+          shellcheck "$CAPSULE_SCRIPT"
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Shellcheck failed on generated script '$CAPSULE_SCRIPT'! Exit code $ec."; exit 1; fi
+          echo "Shellcheck passed on generated script."
+          echo "----------------------------------------"
+
+      - name: Test Basic Extraction and Exclusions (macOS)
+        run: |
+          echo "--- Testing basic extraction (macOS) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          TARGET_DIR="${{ env.FUNC_OUTPUT_DIR }}"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR"
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Capsule script failed basic extraction! Exit code $ec."; exit 1; fi
+          echo "--- Contents of '$TARGET_DIR': ---"; ls -lR "$TARGET_DIR"
+          echo "--- Verifying files ---"
+          test -f "$TARGET_DIR/file1.txt" || (echo "::error::file1.txt missing!" && exit 1)
+          test -f "$TARGET_DIR/subdir/another.txt" || (echo "::error::subdir/another.txt missing!" && exit 1)
+          test -f "$TARGET_DIR/subdir/small_bin.dat" || (echo "::error::subdir/small_bin.dat missing!" && exit 1)
+          if test -f "$TARGET_DIR/subdir/file2.log"; then echo "::error::Excluded file subdir/file2.log was extracted!"; exit 1; else echo "Excluded file correctly absent."; fi
+          echo "Basic extraction passed."; echo "----------------------------------------"
+
+      - name: Test Content Integrity (Capsule Diff vs Modified Source - macOS)
+        run: |
+          echo "--- Testing content integrity via capsule --diff (macOS) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          SOURCE_DIR="${{ env.FUNC_SOURCE_DIR }}"
+          EXCLUDED_FILE_PATH="${{ env.EXCLUDED_FILE_PATH }}"
+          echo "Temporarily removing excluded file '$EXCLUDED_FILE_PATH' from '$SOURCE_DIR'"
+          if [[ -f "$EXCLUDED_FILE_PATH" ]]; then mv "$EXCLUDED_FILE_PATH" "${EXCLUDED_FILE_PATH}.bak"; else echo "Warning: Excluded file not found."; fi
+          echo "Running capsule's internal diff against modified source '$SOURCE_DIR'"
+          set +e; ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --diff "$SOURCE_DIR"; ec=$?; set -e
+          if [[ -f "${EXCLUDED_FILE_PATH}.bak" ]]; then echo "Restoring excluded file"; mv "${EXCLUDED_FILE_PATH}.bak" "$EXCLUDED_FILE_PATH"; fi
+          if [[ $ec -eq 0 ]]; then echo "Internal --diff correctly reported no differences.";
+          elif [[ $ec -eq 1 ]]; then echo "::error::Internal --diff reported differences unexpectedly!"; exit 1;
+          else echo "::error::Internal --diff failed! Exit code $ec"; exit 1; fi
+          echo "Capsule diff check passed."; echo "----------------------------------------"
+
+      - name: Test Generated Script --verify command (macOS)
+        run: |
+          echo "--- Testing generated script's --verify command (macOS) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          TARGET_DIR="${{ env.FUNC_OUTPUT_DIR }}"
+          echo "Running: ${{ env.BASH_EXEC }} $CAPSULE_SCRIPT --target-dir $TARGET_DIR --verify"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --verify
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Capsule script --verify failed! Exit code $ec."; exit 1; fi
+          echo "--verify command check passed."; echo "----------------------------------------"
+
+      - name: Test Generated Script --recalculate-hash command (macOS)
+        run: |
+          echo "--- Testing --recalculate-hash command (macOS) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          TARGET_DIR="${{ env.FUNC_OUTPUT_DIR }}"
+          FUNC_SOURCE_DIR="${{ env.FUNC_SOURCE_DIR }}"
+          FILE_TO_MODIFY="${{ env.FILE_TO_MODIFY }}"
+          # Perform path manipulation within the script block
+          FILE_TO_MODIFY_REL="${FILE_TO_MODIFY#$FUNC_SOURCE_DIR/}"
+          FILE_TO_MODIFY_ABS="$TARGET_DIR/$FILE_TO_MODIFY_REL"
+
+          echo "1. Initial verify (should pass)"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --verify || exit 1
+
+          echo "2. Modifying file: $FILE_TO_MODIFY_ABS"
+          echo "Modification line macOS" >> "$FILE_TO_MODIFY_ABS"
+          ls -l "$FILE_TO_MODIFY_ABS"
+
+          echo "3. Verify after modification (should fail)"
+          set +e; ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --verify; ec=$?; set -e
+          if [[ $ec -eq 0 ]]; then echo "::error::Verify unexpectedly passed after modification!"; exit 1; else echo "Verify correctly failed (exit code $ec)."; fi
+
+          echo "4. Recalculating hash (using yes pipe)"
+          # Use gyes if available (from coreutils), otherwise standard yes
+          YES_CMD="yes"
+          if command -v gyes &>/dev/null; then YES_CMD="gyes"; fi
+          set +o pipefail # Temporarily disable pipefail for this command
+          $YES_CMD | ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --recalculate-hash
+          recalc_ec=$? # Capture capsule script exit code specifically
+          set -o pipefail # Re-enable pipefail
+          if [[ $recalc_ec -ne 0 ]]; then echo "::error::Recalculate hash command failed! Exit code $recalc_ec."; exit 1; fi
+
+          echo "5. Final verify (should pass)"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --verify || exit 1
+
+          echo "--recalculate-hash test passed."; echo "----------------------------------------"
+
+      - name: Test Generated Script --retry-failed command (macOS)
+        run: |
+          echo "--- Testing --retry-failed command (macOS - Simulation) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          TARGET_DIR="${{ env.FUNC_OUTPUT_DIR }}"
+          FUNC_SOURCE_DIR="${{ env.FUNC_SOURCE_DIR }}"
+          FILE_TO_DELETE="${{ env.FILE_TO_DELETE }}"
+          # Perform path manipulation within the script block
+          FILE_TO_DELETE_REL="${FILE_TO_DELETE#$FUNC_SOURCE_DIR/}"
+          FILE_TO_DELETE_ABS="$TARGET_DIR/$FILE_TO_DELETE_REL"
+          CAPSULE_BACKUP="${CAPSULE_SCRIPT}.bak.retrytest"
+
+          echo "1. Ensure target file exists: $FILE_TO_DELETE_ABS"
+          test -f "$FILE_TO_DELETE_ABS" || { echo "::error::File to delete does not exist initially!"; ls -lR "$TARGET_DIR"; exit 1; }
+
+          echo "2. Deleting file to simulate failure: $FILE_TO_DELETE_ABS"
+          rm "$FILE_TO_DELETE_ABS"
+          test ! -f "$FILE_TO_DELETE_ABS" || { echo "::error::File deletion failed!"; exit 1; }
+
+          echo "3. Modifying capsule script to populate FAILED_FILES array"
+          cp "$CAPSULE_SCRIPT" "$CAPSULE_BACKUP" || exit 1
+          # Construct the absolute path as the generated script would see it
+          # Use grealpath if available for robustness
+          REALPATH_CMD_RT="realpath"
+          if command -v grealpath &>/dev/null; then REALPATH_CMD_RT="grealpath"; fi
+          TARGET_DIR_ABS=$($REALPATH_CMD_RT "$TARGET_DIR")
+          if [[ -z "$TARGET_DIR_ABS" ]]; then echo "::error::Could not determine absolute target path."; exit 1; fi
+          FAILED_FILE_ENTRY="$TARGET_DIR_ABS/$FILE_TO_DELETE_REL"
+          # Use # as sed separator to avoid issues with / in paths
+          # Escape potential special characters in the path for sed
+          FAILED_FILE_ENTRY_ESC=$(sed -e 's/[&\\#]/\\&/g' <<< "$FAILED_FILE_ENTRY")
+          # Replace 'declare -a FAILED_FILES=()' with the populated version - use .bak for BSD sed -i
+          sed -i.sedbak "s#^declare -a FAILED_FILES=()\$#declare -a FAILED_FILES=(\"$FAILED_FILE_ENTRY_ESC\")#" "$CAPSULE_SCRIPT" || exit 1
+          rm -f "${CAPSULE_SCRIPT}.sedbak"
+          echo "--- Modified FAILED_FILES line: ---"
+          grep 'declare -a FAILED_FILES=' "$CAPSULE_SCRIPT"
+          echo "---------------------------------"
+
+          echo "4. Running --retry-failed"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --retry-failed
+          retry_ec=$?; if [[ $retry_ec -ne 0 ]]; then echo "::error::Retry failed command failed! Exit code $retry_ec."; mv "$CAPSULE_BACKUP" "$CAPSULE_SCRIPT"; exit 1; fi
+
+          echo "5. Verifying file now exists: $FILE_TO_DELETE_ABS"
+          test -f "$FILE_TO_DELETE_ABS" || { echo "::error::File was not recreated by --retry-failed!"; ls -lR "$TARGET_DIR"; mv "$CAPSULE_BACKUP" "$CAPSULE_SCRIPT"; exit 1; }
+
+          echo "6. Restoring original capsule script"
+          mv "$CAPSULE_BACKUP" "$CAPSULE_SCRIPT" || exit 1
+
+          echo "--retry-failed test passed."; echo "----------------------------------------"
+
+
+      - name: Test Generated Script --dry-run command (macOS)
+        run: |
+           echo "--- Testing generated script's --dry-run command (macOS) ---"
+           CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+           echo "Running: ${{ env.BASH_EXEC }} $CAPSULE_SCRIPT --dry-run"
+           ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --dry-run
+           ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Capsule script --dry-run failed! Exit code $ec."; exit 1; fi
+           echo "--dry-run command check passed."; echo "----------------------------------------"
+
+      - name: Test Generated Script --dump command (macOS)
+        run: |
+          echo "--- Testing generated script's --dump command (macOS) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          DUMP_OUTPUT_FILE="dump_output_macos.txt"
+          echo "Running: ${{ env.BASH_EXEC }} $CAPSULE_SCRIPT --dump > $DUMP_OUTPUT_FILE"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --dump > "$DUMP_OUTPUT_FILE"
+          ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Capsule script --dump failed! Exit code $ec."; exit 1; fi
+          echo "--- Dump Output Contents: ---"; cat "$DUMP_OUTPUT_FILE"; echo "--- End Dump Output ---"
+          echo "Verifying dump content..."
+          grep -Fq "file1.txt" "$DUMP_OUTPUT_FILE" || (echo "::error::Dump missing file1.txt!" && exit 1)
+          grep -Fq "subdir/another.txt" "$DUMP_OUTPUT_FILE" || (echo "::error::Dump missing subdir/another.txt!" && exit 1)
+          grep -Fq "subdir/small_bin.dat" "$DUMP_OUTPUT_FILE" || (echo "::error::Dump missing subdir/small_bin.dat!" && exit 1)
+          if grep -Fq "subdir/file2.log"; then echo "::error::Dump includes excluded file subdir/file2.log!"; exit 1; else echo "Verified excluded file absent from dump."; fi
+          echo "Dump command content checks passed."; echo "----------------------------------------"
+
+      - name: Check for Marker in Generated Script (macOS - Sanity Check)
+        run: |
+          echo "--- Checking for specific embedding marker (macOS - Sanity Check) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          MARKER="# <<< BEGIN FILE: file1.txt >>>"
+          echo "Searching for marker: '$MARKER'"
+          if grep -Fq "$MARKER" "$CAPSULE_SCRIPT"; then echo "Marker '$MARKER' found.";
+          else echo "::error file=$CAPSULE_SCRIPT::Marker '$MARKER' NOT FOUND!"; head -n 50 "$CAPSULE_SCRIPT" || true; exit 1; fi
+          echo "----------------------------------------"
+
+      - name: Test Generated Script --update command (macOS - Idempotency Check)
+        run: |
+          echo "--- Testing --update command (macOS) ---"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          TARGET_DIR="${{ env.FUNC_OUTPUT_DIR }}"
+          echo "Running: ${{ env.BASH_EXEC }} $CAPSULE_SCRIPT --target-dir $TARGET_DIR --update"
+          ${{ env.BASH_EXEC }} "$CAPSULE_SCRIPT" --target-dir "$TARGET_DIR" --update
+           ec=$?; if [[ $ec -ne 0 ]]; then echo "::error::Capsule script --update failed! Exit code $ec."; exit 1; fi
+          echo "--update command ran successfully."; echo "----------------------------------------"
+
+      - name: Cleanup Functionality Test Files (macOS)
+        if: always()
+        run: |
+          echo "--- Cleaning up Functionality Test Files (macOS) ---"
+          ls -la . || true
+          SOURCE_DIR="${{ env.FUNC_SOURCE_DIR }}"
+          OUTPUT_DIR="${{ env.FUNC_OUTPUT_DIR }}"
+          CAPSULE_SCRIPT="${{ steps.generate-func-capsule.outputs.CAPSULE_SCRIPT }}"
+          EXCLUDED_FILE_BAK="${{ env.EXCLUDED_FILE_PATH }}.bak"
+          CAPSULE_RETRY_BAK="${CAPSULE_SCRIPT}.bak.retrytest"
+          echo "Removing source dir: $SOURCE_DIR"; rm -rf "$SOURCE_DIR"
+          if [[ -f "$EXCLUDED_FILE_BAK" ]]; then echo "Removing backup excluded file: $EXCLUDED_FILE_BAK"; rm -f "$EXCLUDED_FILE_BAK"; fi
+          echo "Removing output dir: $OUTPUT_DIR"; rm -rf "$OUTPUT_DIR"
+          if [[ -n "$CAPSULE_SCRIPT" ]]; then echo "Removing capsule script: $CAPSULE_SCRIPT"; rm -f "$CAPSULE_SCRIPT"; fi
+          if [[ -f "$CAPSULE_RETRY_BAK" ]]; then echo "Removing retry test backup: $CAPSULE_RETRY_BAK"; rm -f "$CAPSULE_RETRY_BAK"; fi
+          rm -f dump_output_macos.txt;
+          echo "Cleanup complete. Remaining files:"; ls -la . || true
